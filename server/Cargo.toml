@@ -1,0 +1,18 @@
+[package]
+name = "cloud-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7"
+tokio = { workspace = true }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
