@@ -1,0 +1,23 @@
+# Leader key configuration
+leader = " "
+
+# Profiles configuration
+profiles_path = "~/.cloudtui/profiles"
+
+[keybindings]
+# Global keybindings (work in any tab)
+"q" = { action = "Quit", tab = "any" }
+"gt" = { action = "Next Tab", tab = "any" }
+"gT" = { action = "Previous Tab", tab = "any" }
+"<leader>d" = { action = "Toggle Debug", tab = "any" }
+
+# Server tab keybindings
+"s" = { action = "Start/Stop Server", tab = "server" }
+"n" = { action = "Create Profile", tab = "server" }
+"d" = { action = "Delete Profile", tab = "server" }
+"<Up>" = { action = "Previous Profile", tab = "server" }
+"<Down>" = { action = "Next Profile", tab = "server" }
+
+# Profile creation keybindings (when creating profile)
+"<Enter>" = { action = "Confirm Profile", tab = "server" }
+"<Esc>" = { action = "Cancel Profile", tab = "server" }
