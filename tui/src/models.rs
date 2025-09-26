@@ -10,7 +10,7 @@ use ratatui::{
 };
 use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
 
-use crate::tabs::{SelectedTab, server_tab};
+use crate::tabs::{server_tab, SelectedTab};
 
 #[derive(Default)]
 pub struct App {

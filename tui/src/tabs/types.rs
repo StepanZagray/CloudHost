@@ -1,9 +1,9 @@
 use ratatui::{
     layout::Rect,
+    prelude::Stylize,
     style::palette::tailwind,
     symbols,
     widgets::{Block, Padding, Widget},
-    prelude::Stylize,
 };
 use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
 
