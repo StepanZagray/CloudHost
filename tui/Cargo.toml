@@ -19,3 +19,5 @@ uuid = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 dirs = "5.0"
+cloud-server = { path = "../server" }
+tracing-subscriber = "0.3"

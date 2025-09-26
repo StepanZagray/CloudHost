@@ -261,6 +261,7 @@ dependencies = [
  "axum",
  "chrono",
  "dirs",
+ "mime_guess",
  "serde",
  "serde_json",
  "tokio",
@@ -277,6 +278,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "cloud-server",
  "color-eyre",
  "crossterm 0.29.0",
  "dirs",
@@ -289,6 +291,7 @@ dependencies = [
  "strum_macros 0.27.2",
  "tokio",
  "toml",
+ "tracing-subscriber",
  "uuid",
 ]
 

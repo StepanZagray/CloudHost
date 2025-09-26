@@ -1,16 +1,16 @@
-use std::path::PathBuf;
-
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{palette::tailwind, Stylize},
-    symbols,
+    prelude::Stylize,
     text::Line,
-    widgets::{Block, Padding, Paragraph, Tabs, Widget},
+    widgets::{Tabs, Widget},
 };
-use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
+use strum::IntoEnumIterator;
 
-use crate::tabs::{server_tab, SelectedTab};
+use crate::tabs::{server, client, settings, SelectedTab, focus::TabFocus};
+
+// Timeout for key sequences (like Vim's timeoutlen)
+const KEY_SEQUENCE_TIMEOUT_MS: u64 = 1000; // 1 second
 
 #[derive(Default)]
 pub struct App {
@@ -22,20 +22,12 @@ pub struct App {
     pub debug_mode: bool,
     pub debug_info: Vec<String>,
 
-    // Server and profile management
-    pub profiles: Vec<Profile>,
-    pub selected_profile_index: usize,
-    pub server_running: bool,
-    pub creating_profile: bool,
-    pub new_profile_name: String,
-    pub profile_creation_error: Option<String>,
+    // Tab states
+    pub server_state: server::models::ServerState,
+    pub client_state: client::models::ClientState,
+    pub settings_state: settings::models::SettingsState,
 }
 
-#[derive(Debug, Clone)]
-pub struct Profile {
-    pub name: String,
-    pub folder_path: PathBuf,
-}
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum AppState {
@@ -48,7 +40,7 @@ pub enum AppState {
 pub enum InputState {
     Normal,
     NumberPrefix,
-    KeySequence(String), // Stores the current key sequence being typed
+    KeySequence(String, std::time::Instant), // Stores the current key sequence and when it started
 }
 
 impl Default for InputState {
@@ -59,12 +51,13 @@ impl Default for InputState {
 
 impl App {
     pub fn new() -> Self {
-        let mut app = Self {
+        Self {
             config: crate::config::Config::load_or_default(),
+            server_state: server::models::ServerState::new(),
+            client_state: client::models::ClientState::default(),
+            settings_state: settings::models::SettingsState::default(),
             ..Default::default()
-        };
-        app.load_profiles();
-        app
+        }
     }
 
     pub fn next_tab(&mut self) {
@@ -120,142 +113,54 @@ impl App {
         }
     }
 
-    // Server and profile management methods
-    pub fn start_creating_profile(&mut self) {
-        self.creating_profile = true;
-        self.new_profile_name = String::new();
-        self.profile_creation_error = None;
-        self.add_debug("Started creating new profile");
-    }
-
-    pub fn cancel_creating_profile(&mut self) {
-        self.creating_profile = false;
-        self.new_profile_name = String::new();
-        self.profile_creation_error = None;
-        self.add_debug("Cancelled profile creation");
-    }
-
-    pub fn create_profile(&mut self) {
-        if !self.new_profile_name.is_empty() {
-            let name = self.new_profile_name.trim();
-
-            // Check if profile already exists
-            if self.profile_exists(name) {
-                self.profile_creation_error = Some(format!("Profile '{}' already exists", name));
-                self.add_debug(&format!("Profile '{}' already exists", name));
-                return;
-            }
-
-            // Create profile folder
-            let profiles_path = self.expand_path(&self.config.profiles_path);
-            let profile_folder = format!("{}/{}", profiles_path, name);
-
-            if let Err(e) = std::fs::create_dir_all(&profile_folder) {
-                self.profile_creation_error =
-                    Some(format!("Failed to create profile folder: {}", e));
-                self.add_debug(&format!("Failed to create profile folder: {}", e));
-                return;
-            }
-
-            let profile = Profile {
-                name: name.to_string(),
-                folder_path: profile_folder.into(),
-            };
-
-            self.profiles.push(profile);
-            self.add_debug(&format!("Created profile: {}", name));
-
-            self.creating_profile = false;
-            self.new_profile_name = String::new();
-            self.profile_creation_error = None;
+    // Tab-specific focus management
+    pub fn cycle_focus_forward(&mut self) {
+        match self.selected_tab {
+            SelectedTab::Server => self.server_state.cycle_focus_forward(),
+            SelectedTab::Client => self.client_state.cycle_focus_forward(),
+            SelectedTab::Settings => self.settings_state.cycle_focus_forward(),
         }
     }
 
-    pub fn start_server(&mut self) {
-        if let Some(profile) = self.profiles.get(self.selected_profile_index) {
-            self.server_running = true;
-            self.add_debug(&format!("Started server for profile: {}", profile.name));
+    pub fn cycle_focus_backward(&mut self) {
+        match self.selected_tab {
+            SelectedTab::Server => self.server_state.cycle_focus_backward(),
+            SelectedTab::Client => self.client_state.cycle_focus_backward(),
+            SelectedTab::Settings => self.settings_state.cycle_focus_backward(),
         }
     }
 
-    pub fn stop_server(&mut self) {
-        self.server_running = false;
-        self.add_debug("Stopped server");
-    }
-
-    pub fn load_profiles(&mut self) {
-        let profiles_path = self.expand_path(&self.config.profiles_path);
-        self.add_debug(&format!("Loading profiles from: {}", profiles_path));
-
-        if let Ok(entries) = std::fs::read_dir(&profiles_path) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if entry.path().is_dir() {
-                        let profile = Profile {
-                            name: name.to_string(),
-                            folder_path: entry.path(),
-                        };
-                        self.profiles.push(profile);
-                        self.add_debug(&format!("Loaded profile: {}", name));
-                    }
-                }
-            }
-        } else {
-            self.add_debug(&format!(
-                "Could not read profiles directory: {}",
-                profiles_path
-            ));
+    pub fn get_current_focused_element(&self) -> String {
+        match self.selected_tab {
+            SelectedTab::Server => self.server_state.get_focused_element(),
+            SelectedTab::Client => self.client_state.get_focused_element(),
+            SelectedTab::Settings => self.settings_state.get_focused_element(),
         }
     }
 
-    pub fn expand_path(&self, path: &str) -> String {
-        if path.starts_with("~/") {
-            if let Some(home) = dirs::home_dir() {
-                return format!("{}/{}", home.to_string_lossy(), &path[2..]);
-            }
-        }
-        path.to_string()
-    }
-
-    pub fn profile_exists(&self, name: &str) -> bool {
-        self.profiles.iter().any(|p| p.name == name)
-    }
-
-    pub fn delete_selected_profile(&mut self) {
-        if !self.profiles.is_empty() && self.selected_profile_index < self.profiles.len() {
-            let profile_name = self.profiles[self.selected_profile_index].name.clone();
-            let profile_path = self.profiles[self.selected_profile_index]
-                .folder_path
-                .clone();
-
-            // Try to remove the directory
-            match std::fs::remove_dir_all(&profile_path) {
-                Ok(_) => {
-                    self.profiles.remove(self.selected_profile_index);
-                    // Adjust selected index if needed
-                    if self.selected_profile_index >= self.profiles.len()
-                        && !self.profiles.is_empty()
-                    {
-                        self.selected_profile_index = self.profiles.len() - 1;
-                    }
-                    self.add_debug(&format!("Deleted profile: {}", profile_name));
-                }
-                Err(e) => {
-                    self.add_debug(&format!(
-                        "Failed to delete profile '{}': {}",
-                        profile_name, e
-                    ));
-                }
-            }
+    // Tab-specific navigation methods
+    pub fn handle_tab_navigation(&mut self, key: ratatui::crossterm::event::KeyCode) -> bool {
+        match self.selected_tab {
+            SelectedTab::Server => self.server_state.handle_navigation(key),
+            SelectedTab::Client => self.client_state.handle_navigation(key),
+            SelectedTab::Settings => self.settings_state.handle_navigation(key),
         }
     }
 
-    pub fn handle_dynamic_key(&mut self, key: ratatui::crossterm::event::KeyCode) {
+    pub fn handle_dynamic_key(&mut self, key: ratatui::crossterm::event::KeyCode, modifiers: ratatui::crossterm::event::KeyModifiers) {
         use ratatui::crossterm::event::KeyCode;
 
         // Convert key to string for config lookup
         let key_str = match key {
-            KeyCode::Char(c) => c.to_string(),
+            KeyCode::Char(c) => {
+                // Check for Ctrl combinations
+                if c.is_ascii_control() {
+                    let ctrl_char = (c as u8 + 96) as char; // Convert control char to letter
+                    format!("<Ctrl>{}", ctrl_char)
+                } else {
+                    c.to_string()
+                }
+            },
             KeyCode::Up => "<Up>".to_string(),
             KeyCode::Down => "<Down>".to_string(),
             KeyCode::Left => "<Left>".to_string(),
@@ -263,6 +168,14 @@ impl App {
             KeyCode::Enter => "<Enter>".to_string(),
             KeyCode::Esc => "<Esc>".to_string(),
             KeyCode::Backspace => "<Backspace>".to_string(),
+            KeyCode::Tab => {
+                // Check for Shift+Tab
+                if modifiers.contains(ratatui::crossterm::event::KeyModifiers::SHIFT) {
+                    "<S-Tab>".to_string()
+                } else {
+                    "<Tab>".to_string()
+                }
+            },
             _ => return,
         };
 
@@ -277,60 +190,50 @@ impl App {
         self.add_debug(&format!("Input state: {:?}", self.input_state));
 
         // Handle special cases first (profile creation)
-        if self.creating_profile {
-            match key {
-                KeyCode::Enter => {
-                    self.create_profile();
-                    return;
-                }
-                KeyCode::Esc => {
-                    self.cancel_creating_profile();
-                    return;
-                }
-                KeyCode::Char(c) => {
-                    self.new_profile_name.push(c);
-                    self.profile_creation_error = None; // Clear error when typing
-                    return;
-                }
-                KeyCode::Backspace => {
-                    self.new_profile_name.pop();
-                    self.profile_creation_error = None; // Clear error when editing
-                    return;
-                }
-                _ => return,
-            }
+        if self.server_state.creating_profile {
+            self.server_state.handle_profile_input(key);
+            return;
         }
 
         // Handle leader key sequences first
         if key_str == self.config.leader {
-            self.input_state = InputState::KeySequence("<leader>".to_string());
+            self.input_state = InputState::KeySequence("<leader>".to_string(), std::time::Instant::now());
             self.add_debug(&format!("Leader key ('{}') pressed", key_str));
             return;
         }
 
-        // Handle multi-key sequences (like gt, gT, <leader>d)
-        if let InputState::KeySequence(ref seq) = self.input_state {
-            if seq == "<leader>" {
-                let leader_key = format!("<leader>{}", key_str);
-                if let Some(keybinding) = self.config.get_keybinding(&leader_key) {
-                    if self.config.is_key_valid_for_tab(&leader_key, current_tab) {
-                        match keybinding.action.as_str() {
-                            "Toggle Debug" => self.toggle_debug(),
-                            _ => {}
-                        }
+        // Handle multi-key sequences (like gt, gT, <leader>d, ft, etc.)
+        if let InputState::KeySequence(ref seq, start_time) = self.input_state {
+            // Check if the sequence has timed out
+            if start_time.elapsed().as_millis() > KEY_SEQUENCE_TIMEOUT_MS as u128 {
+                // Timeout reached, execute the single key if it exists
+                if let Some(keybinding) = self.config.get_keybinding(seq) {
+                    if self.config.is_key_valid_for_tab(seq, current_tab) {
+                        let action = keybinding.action.clone();
+                        self.execute_action(&action);
                     }
                 }
                 self.input_state = InputState::Normal;
                 return;
-            } else if seq == "g" {
-                let g_key = format!("g{}", key_str);
-                if let Some(keybinding) = self.config.get_keybinding(&g_key) {
-                    if self.config.is_key_valid_for_tab(&g_key, current_tab) {
-                        match keybinding.action.as_str() {
-                            "Next Tab" => self.next_tab(),
-                            "Previous Tab" => self.previous_tab(),
-                            _ => {}
-                        }
+            }
+
+            if seq == "<leader>" {
+                let leader_key = format!("<leader>{}", key_str);
+                if let Some(keybinding) = self.config.get_keybinding(&leader_key) {
+                    if self.config.is_key_valid_for_tab(&leader_key, current_tab) {
+                        let action = keybinding.action.clone();
+                        self.execute_action(&action);
+                    }
+                }
+                self.input_state = InputState::Normal;
+                return;
+            } else {
+                // Try to complete the sequence with the current key
+                let complete_key = format!("{}{}", seq, key_str);
+                if let Some(keybinding) = self.config.get_keybinding(&complete_key) {
+                    if self.config.is_key_valid_for_tab(&complete_key, current_tab) {
+                        let action = keybinding.action.clone();
+                        self.execute_action(&action);
                     }
                 }
                 self.input_state = InputState::Normal;
@@ -338,44 +241,37 @@ impl App {
             }
         }
 
-        // Handle single character keys that start sequences
-        if key_str == "g" {
-            self.input_state = InputState::KeySequence("g".to_string());
-            self.add_debug(&format!("Started 'g' sequence"));
+        // Check if this key could start a multi-key sequence
+        // Look for any keybinding that starts with this key
+        // Skip special keys that are complete by themselves (like <Up>, <Down>, <Enter>)
+        // but allow multi-key special keys (like <Ctrl>c, <Alt>f, etc.)
+        let potential_sequences: Vec<String> = self
+            .config
+            .keybindings
+            .keys()
+            .filter(|k| {
+                k.starts_with(&key_str) && 
+                k.len() > 1 && 
+                // Skip if it's a single special key (starts with <, ends with >, and doesn't contain another <)
+                !(k.starts_with('<') && k.ends_with('>') && !k[1..k.len()-1].contains('<'))
+            })
+            .map(|k| k.clone())
+            .collect();
+
+        if !potential_sequences.is_empty() {
+            self.input_state = InputState::KeySequence(key_str.clone(), std::time::Instant::now());
+            self.add_debug(&format!(
+                "Started '{}' sequence, potential: {:?}",
+                key_str, potential_sequences
+            ));
             return;
         }
 
         // Check if key is valid for current tab and process it
         if let Some(keybinding) = self.config.get_keybinding(&key_str) {
             if self.config.is_key_valid_for_tab(&key_str, current_tab) {
-                match keybinding.action.as_str() {
-                    "Quit" => self.quit(),
-                    "Next Tab" => self.next_tab(),
-                    "Previous Tab" => self.previous_tab(),
-                    "Toggle Debug" => self.toggle_debug(),
-                    "Start/Stop Server" => {
-                        if self.server_running {
-                            self.stop_server();
-                        } else {
-                            self.start_server();
-                        }
-                    }
-                    "Create Profile" => self.start_creating_profile(),
-                    "Delete Profile" => self.delete_selected_profile(),
-                    "Previous Profile" => {
-                        if self.selected_profile_index > 0 {
-                            self.selected_profile_index -= 1;
-                        }
-                    }
-                    "Next Profile" => {
-                        if self.selected_profile_index < self.profiles.len().saturating_sub(1) {
-                            self.selected_profile_index += 1;
-                        }
-                    }
-                    _ => {
-                        self.add_debug(&format!("Unknown action: {}", keybinding.action));
-                    }
-                }
+                let action = keybinding.action.clone();
+                self.execute_action(&action);
             } else {
                 self.add_debug(&format!(
                     "Key '{}' not valid for tab '{}'",
@@ -384,6 +280,62 @@ impl App {
             }
         } else {
             self.add_debug(&format!("No keybinding found for key '{}'", key_str));
+        }
+    }
+
+    fn execute_action(&mut self, action: &str) {
+        match action {
+            "Quit" => self.quit(),
+            "Next Tab" => self.next_tab(),
+            "Previous Tab" => self.previous_tab(),
+            "Toggle Debug" => self.toggle_debug(),
+            "Start/Stop Server" => {
+                if self.server_state.is_server_running() {
+                    self.server_state.stop_server();
+                } else {
+                    self.server_state.start_server();
+                }
+            }
+            "Create Profile" => self.server_state.start_creating_profile(),
+            "Delete Profile" => self.server_state.delete_selected_profile(),
+                   "Cycle Focus Forward" => self.cycle_focus_forward(),
+                   "Cycle Focus Backward" => self.cycle_focus_backward(),
+                   "Navigate Up" => {
+                       self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('k'));
+                   },
+                   "Navigate Down" => {
+                       self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('j'));
+                   },
+                   "Navigate to Top" => {
+                       self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('g'));
+                   },
+                   "Navigate to Bottom" => {
+                       self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('G'));
+                   },
+            _ => {
+                self.add_debug(&format!("Unknown action: {}", action));
+            }
+        }
+    }
+
+    /// Check if any pending key sequences have timed out and execute them
+    pub fn check_timeouts(&mut self) {
+        if let InputState::KeySequence(ref seq, start_time) = self.input_state {
+            if start_time.elapsed().as_millis() > KEY_SEQUENCE_TIMEOUT_MS as u128 {
+                // Timeout reached, execute the single key if it exists
+                if let Some(keybinding) = self.config.get_keybinding(seq) {
+                    let current_tab = match self.selected_tab {
+                        SelectedTab::Server => "server",
+                        SelectedTab::Client => "client",
+                        SelectedTab::Settings => "settings",
+                    };
+                    if self.config.is_key_valid_for_tab(seq, current_tab) {
+                        let action = keybinding.action.clone();
+                        self.execute_action(&action);
+                    }
+                }
+                self.input_state = InputState::Normal;
+            }
         }
     }
 }
@@ -407,11 +359,7 @@ impl Widget for &App {
 
             render_title(title_area, buf);
             self.render_tabs(tabs_area, buf);
-            if self.selected_tab == SelectedTab::Server {
-                server_tab::render_server_tab(self, inner_area, buf);
-            } else {
-                self.selected_tab.render(inner_area, buf);
-            }
+            self.selected_tab.render_tab(self, inner_area, buf);
             self.render_footer(footer_area, buf);
             self.render_debug_panel(debug_area, buf);
         } else {
@@ -428,11 +376,7 @@ impl Widget for &App {
 
             render_title(title_area, buf);
             self.render_tabs(tabs_area, buf);
-            if self.selected_tab == SelectedTab::Server {
-                server_tab::render_server_tab(self, inner_area, buf);
-            } else {
-                self.selected_tab.render(inner_area, buf);
-            }
+            self.selected_tab.render_tab(self, inner_area, buf);
             self.render_footer(footer_area, buf);
         }
     }
@@ -478,7 +422,7 @@ impl App {
 }
 
 pub fn render_title(area: Rect, buf: &mut Buffer) {
-    "Ratatui Tabs Example".bold().render(area, buf);
+    "CloudTUI".bold().render(area, buf);
 }
 
 impl App {
@@ -486,7 +430,7 @@ impl App {
         let leader = &self.config.leader;
         let footer_text = match self.selected_tab {
             SelectedTab::Server => {
-                if self.creating_profile {
+                if self.server_state.creating_profile {
                     "Type profile name and press Enter to create, Esc to cancel"
                 } else {
                     "↑↓ to navigate profiles | s to start/stop server | n to create profile | d to delete profile | q to quit"

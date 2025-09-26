@@ -65,13 +65,12 @@ impl SelectedTab {
     }
 }
 
-impl Widget for SelectedTab {
-    fn render(self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
-        // in a real app these might be separate widgets
+impl SelectedTab {
+    pub fn render_tab(self, app: &crate::models::App, area: Rect, buf: &mut ratatui::buffer::Buffer) {
         match self {
-            Self::Server => self.render_server_placeholder(area, buf),
-            Self::Client => self.render_client_tab(area, buf),
-            Self::Settings => self.render_settings_tab(area, buf),
+            Self::Server => crate::tabs::server::ui::render_server_tab(app, area, buf),
+            Self::Client => crate::tabs::client::ui::render_client_tab(app, area, buf),
+            Self::Settings => crate::tabs::settings::ui::render_settings_tab(app, area, buf),
         }
     }
 }
@@ -80,20 +79,6 @@ impl SelectedTab {
     pub fn render_server_placeholder(self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
         use ratatui::widgets::Paragraph;
         Paragraph::new("Server functionality - managed by App")
-            .block(self.block())
-            .render(area, buf);
-    }
-
-    pub fn render_client_tab(self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
-        use ratatui::widgets::Paragraph;
-        Paragraph::new("Client functionality coming soon!")
-            .block(self.block())
-            .render(area, buf);
-    }
-
-    pub fn render_settings_tab(self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
-        use ratatui::widgets::Paragraph;
-        Paragraph::new("Settings and configuration")
             .block(self.block())
             .render(area, buf);
     }

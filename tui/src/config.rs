@@ -77,14 +77,30 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let config_str = std::fs::read_to_string("config.toml")?;
-        let config: Config = toml::from_str(&config_str)?;
-        Ok(config)
+        // Try multiple possible locations for config.toml
+        let possible_paths = [
+            "config.toml",
+            "./config.toml",
+            "../config.toml",
+            "tui/config.toml",
+        ];
+
+        for path in &possible_paths {
+            if let Ok(config_str) = std::fs::read_to_string(path) {
+                let config: Config = toml::from_str(&config_str)?;
+                return Ok(config);
+            }
+        }
+
+        Err("Could not find config.toml in any expected location".into())
     }
 
     pub fn load_or_default() -> Self {
-        Self::load().unwrap_or_else(|_| {
-            println!("Warning: Could not load config.toml, using default keybindings");
+        Self::load().unwrap_or_else(|e| {
+            eprintln!(
+                "Warning: Could not load config.toml ({}), using default keybindings",
+                e
+            );
             Self::default()
         })
     }

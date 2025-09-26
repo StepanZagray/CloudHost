@@ -15,8 +15,16 @@ profiles_path = "~/.cloudtui/profiles"
 "s" = { action = "Start/Stop Server", tab = "server" }
 "n" = { action = "Create Profile", tab = "server" }
 "d" = { action = "Delete Profile", tab = "server" }
-"<Up>" = { action = "Previous Profile", tab = "server" }
-"<Down>" = { action = "Next Profile", tab = "server" }
+
+# Focus management (works in all tabs)
+"<Tab>" = { action = "Cycle Focus Forward", tab = "any" }
+"<S-Tab>" = { action = "Cycle Focus Backward", tab = "any" }
+
+# Vim-style navigation within focused widgets (works in all tabs)
+"k" = { action = "Navigate Up", tab = "any" }
+"j" = { action = "Navigate Down", tab = "any" }
+"gg" = { action = "Navigate to Top", tab = "any" }
+"G" = { action = "Navigate to Bottom", tab = "any" }
 
 # Profile creation keybindings (when creating profile)
 "<Enter>" = { action = "Confirm Profile", tab = "server" }
