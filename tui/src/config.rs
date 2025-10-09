@@ -10,7 +10,7 @@ pub struct Keybinding {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub leader: String,
-    pub profiles_path: String,
+    pub server_config_path: String,
     pub keybindings: HashMap<String, Keybinding>,
 }
 
@@ -69,7 +69,7 @@ impl Default for Config {
 
         Self {
             leader: " ".to_string(),
-            profiles_path: "~/.cloudtui/profiles".to_string(),
+            server_config_path: "~/.cloudtui/server.toml".to_string(),
             keybindings,
         }
     }

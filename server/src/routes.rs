@@ -4,22 +4,72 @@ use axum::{
     response::Html,
 };
 use serde_json::json;
-use std::fs;
+use std::{
+    collections::HashMap,
+    fs,
+    sync::{Arc, Mutex},
+};
 
-use crate::profile::Profile;
+use crate::profile::CloudFolder;
 
-pub async fn index() -> Html<&'static str> {
-    Html(
+// Helper function to reduce redundant error handling
+fn get_cloudfolders_guard(
+    cloudfolders: &Arc<Mutex<HashMap<String, CloudFolder>>>,
+) -> Result<std::sync::MutexGuard<HashMap<String, CloudFolder>>, StatusCode> {
+    cloudfolders
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub async fn index(
+    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
+) -> Result<Html<String>, StatusCode> {
+    let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+    let cloudfolder_list: Vec<&CloudFolder> = cloudfolders_guard.values().collect();
+
+    let cloudfolders_html = if cloudfolder_list.is_empty() {
+        "<p>📭 No Cloud Folders available</p>".to_string()
+    } else {
+        cloudfolder_list
+            .iter()
+            .map(|cloudfolder| {
+                format!(
+                    r#"<div class="cloudfolder-item">
+                        <h3>📁 <a href="/{}">{}</a></h3>
+                        <p>Path: {}</p>
+                        <p><a href="/{}/files">Browse Files</a></p>
+                    </div>"#,
+                    cloudfolder.name,
+                    cloudfolder.name,
+                    cloudfolder.folder_path.display(),
+                    cloudfolder.name
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let html = format!(
         r#"
     <!DOCTYPE html>
     <html>
     <head>
         <title>CloudTUI Server</title>
         <style>
-            body { font-family: Arial, sans-serif; margin: 40px; }
-            .container { max-width: 800px; margin: 0 auto; }
-            .header { text-align: center; margin-bottom: 30px; }
-            .status { background: #f0f0f0; padding: 20px; border-radius: 5px; }
+            body {{ font-family: Arial, sans-serif; margin: 40px; }}
+            .container {{ max-width: 800px; margin: 0 auto; }}
+            .header {{ text-align: center; margin-bottom: 30px; }}
+            .status {{ background: #f0f0f0; padding: 20px; border-radius: 5px; margin-bottom: 20px; }}
+            .cloudfolders {{ background: #f9f9f9; padding: 20px; border-radius: 5px; }}
+            .cloudfolder-item {{ 
+                background: white; 
+                padding: 15px; 
+                margin: 10px 0; 
+                border-radius: 5px; 
+                border-left: 4px solid #007bff;
+            }}
+            .cloudfolder-item a {{ color: #007bff; text-decoration: none; }}
+            .cloudfolder-item a:hover {{ text-decoration: underline; }}
         </style>
     </head>
     <body>
@@ -30,54 +80,157 @@ pub async fn index() -> Html<&'static str> {
             </div>
             <div class="status">
                 <h2>Server Status</h2>
-                <p>✅ Server is running on port 3000</p>
-                <p>📁 Files are being served from your profile folder</p>
-                <p>🔗 Access your files at: <a href="/files">/files</a></p>
+                <p>✅ Server is running</p>
+                <p>📊 {} Cloud Folders available</p>
+            </div>
+            <div class="cloudfolders">
+                <h2>📂 Available Cloud Folders</h2>
+                {}
             </div>
         </div>
     </body>
     </html>
     "#,
-    )
+        cloudfolder_list.len(),
+        cloudfolders_html
+    );
+
+    Ok(Html(html))
 }
 
 pub async fn status(
-    State(profile): State<Profile>,
+    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
 ) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+    let cloudfolder_list: Vec<&CloudFolder> = cloudfolders_guard.values().collect();
+
     let status = json!({
         "status": "running",
-        "profile": {
-            "id": profile.id,
-            "name": profile.name,
-            "folder_path": profile.folder_path
-        },
+        "cloudfolders": cloudfolder_list.len(),
+        "cloudfolder_list": cloudfolder_list.iter().map(|cf| json!({
+            "name": cf.name,
+            "id": cf.id,
+            "folder_path": cf.folder_path
+        })).collect::<Vec<_>>(),
         "timestamp": chrono::Utc::now()
     });
 
     Ok(axum::Json(status))
 }
 
-pub async fn list_root_directory(
-    State(profile): State<Profile>,
-) -> Result<Html<String>, StatusCode> {
-    list_directory_internal(profile, "".to_string()).await
+pub async fn get_cloudfolders_list(
+    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
+) -> Result<axum::Json<serde_json::Value>, StatusCode> {
+    let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+    let cloudfolder_list: Vec<&CloudFolder> = cloudfolders_guard.values().collect();
+
+    let cloudfolders_json = cloudfolder_list
+        .iter()
+        .map(|cf| {
+            json!({
+                "name": cf.name,
+                "id": cf.id,
+                "folder_path": cf.folder_path,
+                "created_at": cf.created_at
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(axum::Json(json!({
+        "cloudfolders": cloudfolders_json
+    })))
 }
 
-pub async fn list_directory(
-    State(profile): State<Profile>,
-    Path(requested_path): Path<String>,
+pub async fn show_cloudfolder_info(
+    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
+    Path(cloudfolder_name): Path<String>,
 ) -> Result<Html<String>, StatusCode> {
-    list_directory_internal(profile, requested_path).await
+    let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+
+    let cloudfolder = cloudfolders_guard
+        .get(&cloudfolder_name)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let html = format!(
+        r#"
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>CloudTUI - {}</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; }}
+            .container {{ max-width: 800px; margin: 0 auto; }}
+            .header {{ text-align: center; margin-bottom: 30px; }}
+            .cloudfolder-info {{ background: #f0f0f0; padding: 20px; border-radius: 5px; margin-bottom: 20px; }}
+            .actions {{ background: #f9f9f9; padding: 20px; border-radius: 5px; }}
+            .btn {{ 
+                display: inline-block; 
+                background: #007bff; 
+                color: white; 
+                padding: 10px 20px; 
+                text-decoration: none; 
+                border-radius: 5px; 
+                margin: 5px;
+            }}
+            .btn:hover {{ background: #0056b3; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🌩️ CloudTUI - {}</h1>
+                <p>Cloud Folder: {}</p>
+            </div>
+            <div class="cloudfolder-info">
+                <h2>Cloud Folder Information</h2>
+                <p><strong>Name:</strong> {}</p>
+                <p><strong>Path:</strong> {}</p>
+                <p><strong>Created:</strong> {}</p>
+            </div>
+            <div class="actions">
+                <h2>Actions</h2>
+                <a href="/{}/files" class="btn">📁 Browse Files</a>
+                <a href="/" class="btn">🏠 Back to All Cloud Folders</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    "#,
+        cloudfolder.name,
+        cloudfolder.name,
+        cloudfolder.name,
+        cloudfolder.folder_path.display(),
+        cloudfolder.created_at.format("%Y-%m-%d %H:%M:%S"),
+        cloudfolder.name,
+        cloudfolder.name
+    );
+
+    Ok(Html(html))
+}
+#[axum::debug_handler]
+pub async fn list_cloudfolder_files(
+    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
+    Path(cloudfolder_name): Path<String>,
+) -> Result<Html<String>, StatusCode> {
+    let cloudfolder = {
+        let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+        cloudfolders_guard
+            .get(&cloudfolder_name)
+            .ok_or(StatusCode::NOT_FOUND)?
+            .clone()
+    };
+
+    browse_directory_internal(cloudfolder, "".to_string()).await
 }
 
-async fn list_directory_internal(
-    profile: Profile,
+async fn browse_directory_internal(
+    cloudfolder: CloudFolder,
     requested_path: String,
 ) -> Result<Html<String>, StatusCode> {
-    let base_path = &profile.folder_path;
+    let base_path = &cloudfolder.folder_path;
     let full_path = base_path.join(&requested_path);
 
-    // Security check: ensure the requested path is within the profile directory
+    // Security check: ensure the requested path is within the cloudfolder directory
     if !full_path.starts_with(base_path) {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -171,7 +324,7 @@ async fn list_directory_internal(
         <div class="container">
             <div class="header">
                 <h1>🌩️ CloudTUI File Browser</h1>
-                <p>Profile: {}</p>
+                <p>Cloud Folder: {}</p>
             </div>
             
             <div class="breadcrumb">
@@ -188,7 +341,7 @@ async fn list_directory_internal(
     </html>
     "#,
         requested_path,
-        profile.name,
+        cloudfolder.name,
         generate_breadcrumb(&requested_path),
         generate_file_list(&items)
     );
@@ -196,11 +349,19 @@ async fn list_directory_internal(
     Ok(Html(html))
 }
 
-pub async fn handle_file_or_directory(
-    State(profile): State<Profile>,
-    Path(path): Path<String>,
+pub async fn browse_file_or_directory(
+    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
+    Path((cloudfolder_name, path)): Path<(String, String)>,
 ) -> Result<Html<String>, StatusCode> {
-    let full_path = profile.folder_path.join(&path);
+    let cloudfolder = {
+        let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+        cloudfolders_guard
+            .get(&cloudfolder_name)
+            .ok_or(StatusCode::NOT_FOUND)?
+            .clone()
+    };
+
+    let full_path = cloudfolder.folder_path.join(&path);
 
     if !full_path.exists() {
         return Err(StatusCode::NOT_FOUND);
@@ -208,7 +369,7 @@ pub async fn handle_file_or_directory(
 
     if full_path.is_dir() {
         // It's a directory, show directory listing
-        list_directory(State(profile), Path(path)).await
+        browse_directory_internal(cloudfolder, path).await
     } else {
         // It's a file, show a download link instead of serving directly
         let file_name = full_path
@@ -243,16 +404,72 @@ pub async fn handle_file_or_directory(
                     <div class="file-info">
                         <p><strong>File:</strong> {}</p>
                         <p><strong>Path:</strong> {}</p>
-                        <a href="/static/{}" class="download-btn">⬇️ Download File</a>
+                        <p><strong>Cloud Folder:</strong> {}</p>
+                        <a href="/{}/static/{}" class="download-btn">⬇️ Download File</a>
                     </div>
                 </div>
             </body>
             </html>
             "#,
-            file_name, file_name, file_name, path, path
+            file_name,
+            file_name,
+            file_name,
+            cloudfolder_name,
+            cloudfolder_name,
+            path,
+            cloudfolder_name
         );
 
         Ok(Html(html))
+    }
+}
+
+pub async fn download_file(
+    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
+    Path((cloudfolder_name, file_path)): Path<(String, String)>,
+) -> Result<axum::response::Response, StatusCode> {
+    let cloudfolder = {
+        let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+        cloudfolders_guard
+            .get(&cloudfolder_name)
+            .ok_or(StatusCode::NOT_FOUND)?
+            .clone()
+    };
+
+    let full_path = cloudfolder.folder_path.join(&file_path);
+
+    // Security check: ensure the requested path is within the cloudfolder directory
+    if !full_path.starts_with(&cloudfolder.folder_path) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if !full_path.exists() || !full_path.is_file() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    // Read the file and serve it
+    match tokio::fs::read(&full_path).await {
+        Ok(content) => {
+            let mime_type = mime_guess::from_path(&full_path)
+                .first_or_text_plain()
+                .to_string();
+
+            Ok(axum::response::Response::builder()
+                .header("Content-Type", mime_type)
+                .header(
+                    "Content-Disposition",
+                    format!(
+                        "inline; filename=\"{}\"",
+                        full_path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("file")
+                    ),
+                )
+                .body(content.into())
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
 

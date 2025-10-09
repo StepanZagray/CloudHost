@@ -14,11 +14,11 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
         return;
     }
 
-    // Create horizontal split: left (profiles) and right (server info + logs)
+    // Create horizontal split: left (cloudfolders) and right (server info + logs)
     let horizontal_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length((area.width * 40 / 100).max(20)), // Left: profiles (40% or min 20 chars)
+            Constraint::Length((area.width * 40 / 100).max(20)), // Left: cloudfolders (40% or min 20 chars)
             Constraint::Min(30), // Right: server info + logs (remaining space)
         ])
         .split(area);
@@ -35,11 +35,11 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
     // Left side: Profile list
     let profile_items: Vec<ListItem> = app
         .server_state
-        .profiles
+        .cloudfolders
         .iter()
         .enumerate()
         .map(|(i, profile)| {
-            let style = if i == app.server_state.selected_profile_index {
+            let style = if i == app.server_state.selected_cloudfolder_index {
                 Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
@@ -49,10 +49,10 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
         .collect();
 
     let mut list_state = ListState::default();
-    list_state.select(Some(app.server_state.selected_profile_index));
+    list_state.select(Some(app.server_state.selected_cloudfolder_index));
 
     // Add focus indicator to title
-    let profile_title = if app.server_state.focused_panel == FocusedPanel::Profiles {
+    let profile_title = if app.server_state.focused_panel == FocusedPanel::CloudFolders {
         "Profiles (FOCUSED)"
     } else {
         "Profiles"
@@ -65,7 +65,7 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
                 .title(profile_title)
                 .title_alignment(Alignment::Left)
                 .border_style(
-                    if app.server_state.focused_panel == FocusedPanel::Profiles {
+                    if app.server_state.focused_panel == FocusedPanel::CloudFolders {
                         Style::default()
                             .fg(Color::Cyan)
                             .add_modifier(ratatui::style::Modifier::BOLD)
@@ -92,18 +92,29 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
     let running_servers_count = app.server_state.get_running_servers_count();
     let server_info = if let Some(profile) = app
         .server_state
-        .profiles
-        .get(app.server_state.selected_profile_index)
+        .cloudfolders
+        .get(app.server_state.selected_cloudfolder_index)
     {
+        let profile_url = if app.server_state.is_server_running() {
+            if let Some(port) = app.server_state.get_server_port() {
+                format!("http://127.0.0.1:{}/{}", port, profile.name)
+            } else {
+                "Server running".to_string()
+            }
+        } else {
+            "Server not running".to_string()
+        };
+
         format!(
-            "Selected Profile: {}\nPath: {}\nTo add files to this profile, add them to the profile folder manually\nStatus: {}\n\nRunning Servers: {}",
+            "Selected Profile: {}\nPath: {}\nURL: {}\nTo add files to this profile, add them to the profile folder manually\nStatus: {}\n\nRunning Servers: {}",
             profile.name,
             profile.folder_path.display(),
+            profile_url,
             server_status,
             running_servers_count
         )
     } else {
-        "No profiles available".to_string()
+        "No cloudfolders available".to_string()
     };
 
     // Add focus indicator to server info title
@@ -187,7 +198,7 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
     server_logs.render(right_vertical_chunks[1], buf);
 
     // Show popup if creating profile
-    if app.server_state.creating_profile {
+    if app.server_state.creating_cloudfolder {
         render_profile_creation_popup(app, area, buf);
     }
 }
@@ -201,33 +212,50 @@ pub fn render_profile_creation_popup(app: &App, area: Rect, buf: &mut Buffer) {
     let popup_area = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints([
-            Constraint::Percentage(25),
-            Constraint::Length(8),
-            Constraint::Percentage(25),
+            Constraint::Percentage(20),
+            Constraint::Length(12),
+            Constraint::Percentage(20),
         ])
         .split(area)[1];
 
     let popup_inner = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(20),
-            Constraint::Percentage(60),
-            Constraint::Percentage(20),
+            Constraint::Percentage(15),
+            Constraint::Percentage(70),
+            Constraint::Percentage(15),
         ])
         .split(popup_area)[1];
 
     // Clear the background
     Clear.render(popup_inner, buf);
 
-    let popup_content = if let Some(error) = &app.server_state.profile_creation_error {
+    // Create content with both fields
+    let name_field = if app.server_state.cloudfolder_input_field
+        == crate::tabs::server::models::CloudFolderInputField::Name
+    {
+        format!("Name: {}_", app.server_state.new_cloudfolder_name)
+    } else {
+        format!("Name: {}", app.server_state.new_cloudfolder_name)
+    };
+
+    let path_field = if app.server_state.cloudfolder_input_field
+        == crate::tabs::server::models::CloudFolderInputField::Path
+    {
+        format!("Path: {}_", app.server_state.new_cloudfolder_path)
+    } else {
+        format!("Path: {}", app.server_state.new_cloudfolder_path)
+    };
+
+    let popup_content = if let Some(error) = &app.server_state.cloudfolder_creation_error {
         format!(
-            "Create New Profile\n\nName: {}\n\nError: {}",
-            app.server_state.new_profile_name, error
+            "Create New Profile\n\n{}\n{}\n\nError: {}",
+            name_field, path_field, error
         )
     } else {
         format!(
-            "Create New Profile\n\nName: {}",
-            app.server_state.new_profile_name
+            "Create New Profile\n\n{}\n{}\n\nPress Tab to switch fields, Enter to confirm, Esc to cancel",
+            name_field, path_field
         )
     };
 

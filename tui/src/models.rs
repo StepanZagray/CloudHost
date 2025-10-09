@@ -6,6 +6,8 @@ use ratatui::{
     widgets::{Tabs, Widget},
 };
 use strum::IntoEnumIterator;
+use std::fs;
+use toml;
 
 use crate::tabs::{server, client, settings, SelectedTab, focus::TabFocus};
 
@@ -51,13 +53,39 @@ impl Default for InputState {
 
 impl App {
     pub fn new() -> Self {
+        let config = crate::config::Config::load_or_default();
+        
+        // Load server config
+        let server_config = Self::load_server_config(&config.server_config_path);
+        
         Self {
-            config: crate::config::Config::load_or_default(),
-            server_state: server::models::ServerState::new(),
+            config,
+            server_state: server::models::ServerState::new_with_config(&server_config),
             client_state: client::models::ClientState::default(),
             settings_state: settings::models::SettingsState::default(),
             ..Default::default()
         }
+    }
+
+    fn load_server_config(server_config_path: &str) -> cloud_server::ServerConfig {
+        let expanded_path = if server_config_path.starts_with("~/") {
+            if let Some(home) = dirs::home_dir() {
+                home.join(&server_config_path[2..])
+            } else {
+                std::path::PathBuf::from(server_config_path)
+            }
+        } else {
+            std::path::PathBuf::from(server_config_path)
+        };
+
+        if let Ok(content) = std::fs::read_to_string(&expanded_path) {
+            if let Ok(server_config) = toml::from_str::<cloud_server::ServerConfig>(&content) {
+                return server_config;
+            }
+        }
+
+        // Return default config if file doesn't exist or is invalid
+        cloud_server::ServerConfig::default()
     }
 
     pub fn next_tab(&mut self) {
@@ -190,7 +218,7 @@ impl App {
         self.add_debug(&format!("Input state: {:?}", self.input_state));
 
         // Handle special cases first (profile creation)
-        if self.server_state.creating_profile {
+        if self.server_state.creating_cloudfolder {
             self.server_state.handle_profile_input(key);
             return;
         }
@@ -296,7 +324,7 @@ impl App {
                     self.server_state.start_server();
                 }
             }
-            "Create Profile" => self.server_state.start_creating_profile(),
+            "Create Profile" => self.server_state.start_creating_cloudfolder(),
             "Delete Profile" => self.server_state.delete_selected_profile(),
                    "Cycle Focus Forward" => self.cycle_focus_forward(),
                    "Cycle Focus Backward" => self.cycle_focus_backward(),
@@ -430,8 +458,8 @@ impl App {
         let leader = &self.config.leader;
         let footer_text = match self.selected_tab {
             SelectedTab::Server => {
-                if self.server_state.creating_profile {
-                    "Type profile name and press Enter to create, Esc to cancel"
+                if self.server_state.creating_cloudfolder {
+                    "Type profile name and folder path, press Tab to switch fields, Enter to confirm, Esc to cancel"
                 } else {
                     "↑↓ to navigate profiles | s to start/stop server | n to create profile | d to delete profile | q to quit"
                 }

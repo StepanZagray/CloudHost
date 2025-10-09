@@ -1,0 +1,7 @@
+# CloudTUI Server Configuration
+
+# Path where cloud folders are stored
+cloudfolders_path = "~/.cloudtui/cloudfolders"
+
+# Server port
+server_port = 3000

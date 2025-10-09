@@ -1,47 +1,63 @@
 use crate::tabs::focus::TabFocus;
-use cloud_server::{CloudServer, Profile as ServerProfile};
+use cloud_server::{CloudFolder as ServerCloudFolder, CloudServer, ServerConfig};
 use ratatui::crossterm::event::KeyCode;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone)]
-pub struct Profile {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudFolder {
     pub name: String,
     pub folder_path: PathBuf,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CloudFoldersConfig {
+    pub cloudfolders: Vec<CloudFolder>,
+}
+
 pub struct ServerState {
-    pub profiles: Vec<Profile>,
-    pub selected_profile_index: usize,
-    pub creating_profile: bool,
-    pub new_profile_name: String,
-    pub profile_creation_error: Option<String>,
+    pub cloudfolders: Vec<CloudFolder>,
+    pub selected_cloudfolder_index: usize,
+    pub creating_cloudfolder: bool,
+    pub new_cloudfolder_name: String,
+    pub new_cloudfolder_path: String,
+    pub cloudfolder_input_field: CloudFolderInputField, // Which field is currently being edited
+    pub cloudfolder_creation_error: Option<String>,
     pub server_logs: Vec<String>,
     pub log_scroll_offset: usize,    // For scrolling through logs
     pub focused_panel: FocusedPanel, // Which panel is currently focused
-    pub running_servers: std::collections::HashMap<String, (u16, CloudServer)>, // profile_name -> (port, server)
-    pub next_port: u16,
+    pub server: Option<CloudServer>,
+    pub server_port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusedPanel {
-    Profiles,
+    CloudFolders,
     ServerInfo,
     ServerLogs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloudFolderInputField {
+    Name,
+    Path,
 }
 
 impl Default for ServerState {
     fn default() -> Self {
         Self {
-            profiles: Vec::new(),
-            selected_profile_index: 0,
-            creating_profile: false,
-            new_profile_name: String::new(),
-            profile_creation_error: None,
+            cloudfolders: Vec::new(),
+            selected_cloudfolder_index: 0,
+            creating_cloudfolder: false,
+            new_cloudfolder_name: String::new(),
+            new_cloudfolder_path: String::new(),
+            cloudfolder_input_field: CloudFolderInputField::Name,
+            cloudfolder_creation_error: None,
             server_logs: Vec::new(),
             log_scroll_offset: 0,
-            focused_panel: FocusedPanel::Profiles,
-            running_servers: std::collections::HashMap::new(),
-            next_port: 3000,
+            focused_panel: FocusedPanel::CloudFolders,
+            server: None,
+            server_port: None,
         }
     }
 }
@@ -49,127 +65,178 @@ impl Default for ServerState {
 impl ServerState {
     pub fn new() -> Self {
         let mut state = Self::default();
-        state.load_profiles();
+        state.load_cloudfolders();
         state
     }
 
-    pub fn start_creating_profile(&mut self) {
-        self.creating_profile = true;
-        self.new_profile_name = String::new();
-        self.profile_creation_error = None;
+    pub fn new_with_config(config: &ServerConfig) -> Self {
+        let mut state = Self::default();
+        state.load_cloudfolders_with_config(config);
+        state
     }
 
-    pub fn cancel_creating_profile(&mut self) {
-        self.creating_profile = false;
-        self.new_profile_name = String::new();
-        self.profile_creation_error = None;
+    pub fn start_creating_cloudfolder(&mut self) {
+        self.creating_cloudfolder = true;
+        self.new_cloudfolder_name = String::new();
+        self.new_cloudfolder_path = String::new();
+        self.cloudfolder_input_field = CloudFolderInputField::Name;
+        self.cloudfolder_creation_error = None;
     }
 
-    pub fn create_profile(&mut self, config: &crate::config::Config) {
-        if !self.new_profile_name.is_empty() {
-            let name = self.new_profile_name.trim();
+    pub fn cancel_creating_cloudfolder(&mut self) {
+        self.creating_cloudfolder = false;
+        self.new_cloudfolder_name = String::new();
+        self.new_cloudfolder_path = String::new();
+        self.cloudfolder_input_field = CloudFolderInputField::Name;
+        self.cloudfolder_creation_error = None;
+    }
 
-            // Check if profile already exists
-            if self.profile_exists(name) {
-                self.profile_creation_error = Some(format!("Profile '{}' already exists", name));
-                return;
-            }
+    pub fn create_profile(&mut self, _config: &crate::config::Config) {
+        let name = self.new_cloudfolder_name.trim();
+        let folder_path = self.new_cloudfolder_path.trim();
 
-            // Create profile folder
-            let profiles_path = self.expand_path(&config.profiles_path);
-            let profile_folder = format!("{}/{}", profiles_path, name);
-
-            if let Err(e) = std::fs::create_dir_all(&profile_folder) {
-                self.profile_creation_error =
-                    Some(format!("Failed to create profile folder: {}", e));
-                return;
-            }
-
-            let profile = Profile {
-                name: name.to_string(),
-                folder_path: profile_folder.into(),
-            };
-
-            self.profiles.push(profile);
-
-            self.creating_profile = false;
-            self.new_profile_name = String::new();
-            self.profile_creation_error = None;
+        if name.is_empty() {
+            self.cloudfolder_creation_error = Some("Profile name cannot be empty".to_string());
+            return;
         }
+
+        if folder_path.is_empty() {
+            self.cloudfolder_creation_error = Some("Profile path cannot be empty".to_string());
+            return;
+        }
+
+        // Check if profile already exists
+        if self.profile_exists(name) {
+            self.cloudfolder_creation_error = Some(format!("Profile '{}' already exists", name));
+            return;
+        }
+
+        // Expand path if it starts with ~
+        let expanded_path = self.expand_path(folder_path);
+        let path_buf = PathBuf::from(&expanded_path);
+
+        // Check if the folder exists
+        if !path_buf.exists() {
+            self.cloudfolder_creation_error =
+                Some(format!("Folder '{}' does not exist", expanded_path));
+            return;
+        }
+
+        if !path_buf.is_dir() {
+            self.cloudfolder_creation_error =
+                Some(format!("'{}' is not a directory", expanded_path));
+            return;
+        }
+
+        // Additional validation: check if path is readable
+        if let Err(e) = std::fs::read_dir(&path_buf) {
+            self.cloudfolder_creation_error =
+                Some(format!("Cannot read directory '{}': {}", expanded_path, e));
+            return;
+        }
+
+        let cloudfolder = CloudFolder {
+            name: name.to_string(),
+            folder_path: path_buf,
+        };
+
+        self.cloudfolders.push(cloudfolder);
+        self.save_cloudfolders_to_toml();
+
+        self.creating_cloudfolder = false;
+        self.new_cloudfolder_name = String::new();
+        self.new_cloudfolder_path = String::new();
+        self.cloudfolder_input_field = CloudFolderInputField::Name;
+        self.cloudfolder_creation_error = None;
     }
 
     pub fn start_server(&mut self) {
-        if let Some(profile) = self.profiles.get(self.selected_profile_index) {
-            let profile_name = profile.name.clone();
-            let profile_path = profile.folder_path.clone();
+        // Check if server is already running
+        if self.server.is_some() {
+            self.add_server_log("⚠️ Server is already running");
+            return;
+        }
 
-            // Check if server is already running for this profile
-            if self.running_servers.contains_key(&profile_name) {
+        // Verify all cloudfolders have valid paths
+        for profile in &self.cloudfolders {
+            if !profile.folder_path.exists() {
                 self.add_server_log(&format!(
-                    "⚠️ Server already running for profile: {}",
-                    profile_name
+                    "❌ Profile folder does not exist: {}",
+                    profile.folder_path.display()
                 ));
                 return;
             }
 
-            // Find next available port
-            let mut port = self.next_port;
-            while self.running_servers.values().any(|(p, _)| *p == port) {
-                port += 1;
+            if !profile.folder_path.is_dir() {
+                self.add_server_log(&format!(
+                    "❌ Profile path is not a directory: {}",
+                    profile.folder_path.display()
+                ));
+                return;
             }
+        }
 
-            // Convert TUI Profile to Server Profile
-            let server_profile = ServerProfile::new(profile_name.clone(), profile_path.clone());
-            let mut server = CloudServer::new();
+        let port = 3000; // Fixed port for single server
+        let mut server = CloudServer::new();
 
-            match server.start_server(server_profile, port) {
-                Ok(_) => {
-                    self.running_servers
-                        .insert(profile_name.clone(), (port, server));
-                    self.next_port = port + 1;
+        // Add all cloudfolders to the server
+        for cloudfolder in &self.cloudfolders {
+            let server_cloudfolder =
+                ServerCloudFolder::new(cloudfolder.name.clone(), cloudfolder.folder_path.clone());
+            server.add_cloudfolder(server_cloudfolder);
+        }
 
-                    self.add_server_log(&format!(
-                        "🚀 Starting server for profile: {}",
-                        profile_name
-                    ));
-                    self.add_server_log(&format!(
-                        "📁 Serving files from: {}",
-                        profile_path.display()
-                    ));
-                    self.add_server_log(&format!("🌐 Server started on http://127.0.0.1:{}", port));
-                    self.add_server_log(&format!(
-                        "📋 Access files at: http://127.0.0.1:{}/files",
-                        port
-                    ));
-                    self.add_server_log(&format!(
-                        "🔗 Server status: http://127.0.0.1:{}/api/status",
-                        port
-                    ));
+        match server.start_server(port) {
+            Ok(_) => {
+                self.server = Some(server);
+                self.server_port = Some(port);
+
+                self.add_server_log("🚀 Starting CloudTUI server");
+                self.add_server_log(&format!("🌐 Server started on http://127.0.0.1:{}", port));
+                self.add_server_log(&format!(
+                    "📊 Serving {} cloudfolders",
+                    self.cloudfolders.len()
+                ));
+
+                let log_messages: Vec<String> = self
+                    .cloudfolders
+                    .iter()
+                    .map(|cloudfolder| {
+                        format!(
+                            "📁 Cloud Folder '{}': http://127.0.0.1:{}/{}",
+                            cloudfolder.name, port, cloudfolder.name
+                        )
+                    })
+                    .collect();
+
+                for message in log_messages {
+                    self.add_server_log(&message);
                 }
-                Err(e) => {
-                    self.add_server_log(&format!("❌ Failed to start server: {}", e));
-                }
+
+                self.add_server_log(&format!(
+                    "🔗 Server status: http://127.0.0.1:{}/api/status",
+                    port
+                ));
+            }
+            Err(e) => {
+                self.add_server_log(&format!("❌ Failed to start server: {}", e));
             }
         }
     }
 
     pub fn stop_server(&mut self) {
-        if let Some(profile) = self.profiles.get(self.selected_profile_index) {
-            let profile_name = profile.name.clone();
+        if let Some(mut server) = self.server.take() {
+            let port = self.server_port.take();
+            server.stop_server();
 
-            if let Some((port, mut server)) = self.running_servers.remove(&profile_name) {
-                server.stop_server();
-                self.add_server_log(&format!(
-                    "🛑 Stopped server for profile: {} (port {})",
-                    profile_name, port
-                ));
-                self.add_server_log("📴 All connections closed");
+            if let Some(port) = port {
+                self.add_server_log(&format!("🛑 Stopped server on port {}", port));
             } else {
-                self.add_server_log(&format!(
-                    "⚠️ No server running for profile: {}",
-                    profile_name
-                ));
+                self.add_server_log("🛑 Stopped server");
             }
+            self.add_server_log("📴 All connections closed");
+        } else {
+            self.add_server_log("⚠️ No server running");
         }
     }
 
@@ -196,22 +263,92 @@ impl ServerState {
         // If not at bottom, don't change scroll offset (user stays where they are)
     }
 
-    pub fn load_profiles(&mut self) {
-        let config = crate::config::Config::load_or_default();
-        let profiles_path = self.expand_path(&config.profiles_path);
+    pub fn load_cloudfolders(&mut self) {
+        self.load_cloudfolders_from_toml();
+    }
 
-        if let Ok(entries) = std::fs::read_dir(&profiles_path) {
+    pub fn load_cloudfolders_with_config(&mut self, config: &ServerConfig) {
+        self.load_cloudfolders_from_toml_with_config(config);
+    }
+
+    pub fn get_cloudfolders_toml_path() -> PathBuf {
+        let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push("CloudTUI");
+        path.push("cloudfolders.toml");
+        path
+    }
+
+    pub fn load_cloudfolders_from_toml(&mut self) {
+        let cloudfolders_toml_path = Self::get_cloudfolders_toml_path();
+
+        if let Ok(content) = std::fs::read_to_string(&cloudfolders_toml_path) {
+            if let Ok(cloudfolders_config) = toml::from_str::<CloudFoldersConfig>(&content) {
+                self.cloudfolders = cloudfolders_config.cloudfolders;
+                return;
+            }
+        }
+
+        // Fallback to old method if cloudfolders.toml doesn't exist or is invalid
+        let config = crate::config::Config::load_or_default();
+        let cloudfolders_path = self.expand_path(&config.server_config_path);
+
+        if let Ok(entries) = std::fs::read_dir(&cloudfolders_path) {
             for entry in entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
                     if entry.path().is_dir() {
-                        let profile = Profile {
+                        let cloudfolder = CloudFolder {
                             name: name.to_string(),
                             folder_path: entry.path(),
                         };
-                        self.profiles.push(profile);
+                        self.cloudfolders.push(cloudfolder);
                     }
                 }
             }
+        }
+    }
+
+    pub fn load_cloudfolders_from_toml_with_config(&mut self, server_config: &ServerConfig) {
+        let cloudfolders_toml_path = Self::get_cloudfolders_toml_path();
+
+        if let Ok(content) = std::fs::read_to_string(&cloudfolders_toml_path) {
+            if let Ok(cloudfolders_config) = toml::from_str::<CloudFoldersConfig>(&content) {
+                self.cloudfolders = cloudfolders_config.cloudfolders;
+                return;
+            }
+        }
+
+        // Fallback to loading from server config path
+        let cloudfolders_path = server_config.expand_path();
+
+        if let Ok(entries) = std::fs::read_dir(&cloudfolders_path) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if entry.path().is_dir() {
+                        let cloudfolder = CloudFolder {
+                            name: name.to_string(),
+                            folder_path: entry.path(),
+                        };
+                        self.cloudfolders.push(cloudfolder);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn save_cloudfolders_to_toml(&self) {
+        let cloudfolders_config = CloudFoldersConfig {
+            cloudfolders: self.cloudfolders.clone(),
+        };
+
+        if let Ok(content) = toml::to_string_pretty(&cloudfolders_config) {
+            let cloudfolders_toml_path = Self::get_cloudfolders_toml_path();
+
+            // Create directory if it doesn't exist
+            if let Some(parent) = cloudfolders_toml_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+
+            let _ = std::fs::write(&cloudfolders_toml_path, content);
         }
     }
 
@@ -227,66 +364,56 @@ impl ServerState {
     }
 
     pub fn profile_exists(&self, name: &str) -> bool {
-        self.profiles.iter().any(|p| p.name == name)
+        self.cloudfolders.iter().any(|p| p.name == name)
     }
 
     pub fn delete_selected_profile(&mut self) {
-        if !self.profiles.is_empty() && self.selected_profile_index < self.profiles.len() {
-            let _profile_name = self.profiles[self.selected_profile_index].name.clone();
-            let profile_path = self.profiles[self.selected_profile_index]
-                .folder_path
+        if !self.cloudfolders.is_empty()
+            && self.selected_cloudfolder_index < self.cloudfolders.len()
+        {
+            let _profile_name = self.cloudfolders[self.selected_cloudfolder_index]
+                .name
                 .clone();
 
-            // Try to remove the directory
-            match std::fs::remove_dir_all(&profile_path) {
-                Ok(_) => {
-                    self.profiles.remove(self.selected_profile_index);
-                    // Adjust selected index if needed
-                    if self.selected_profile_index >= self.profiles.len()
-                        && !self.profiles.is_empty()
-                    {
-                        self.selected_profile_index = self.profiles.len() - 1;
-                    }
-                }
-                Err(_) => {
-                    // Handle error silently for now
-                }
+            // Remove from cloudfolders list (no need to delete folder since we're not creating it anymore)
+            self.cloudfolders.remove(self.selected_cloudfolder_index);
+            self.save_cloudfolders_to_toml();
+
+            // Adjust selected index if needed
+            if self.selected_cloudfolder_index >= self.cloudfolders.len()
+                && !self.cloudfolders.is_empty()
+            {
+                self.selected_cloudfolder_index = self.cloudfolders.len() - 1;
             }
         }
     }
 
     pub fn navigate_profile_up(&mut self) {
-        if self.selected_profile_index > 0 {
-            self.selected_profile_index -= 1;
+        if self.selected_cloudfolder_index > 0 {
+            self.selected_cloudfolder_index -= 1;
         }
     }
 
     pub fn navigate_profile_down(&mut self) {
-        if self.selected_profile_index < self.profiles.len().saturating_sub(1) {
-            self.selected_profile_index += 1;
+        if self.selected_cloudfolder_index < self.cloudfolders.len().saturating_sub(1) {
+            self.selected_cloudfolder_index += 1;
         }
     }
 
     pub fn is_server_running(&self) -> bool {
-        if let Some(profile) = self.profiles.get(self.selected_profile_index) {
-            self.running_servers.contains_key(&profile.name)
-        } else {
-            false
-        }
+        self.server.is_some()
     }
 
     pub fn get_server_port(&self) -> Option<u16> {
-        if let Some(profile) = self.profiles.get(self.selected_profile_index) {
-            self.running_servers
-                .get(&profile.name)
-                .map(|(port, _)| *port)
-        } else {
-            None
-        }
+        self.server_port
     }
 
     pub fn get_running_servers_count(&self) -> usize {
-        self.running_servers.len()
+        if self.server.is_some() {
+            1
+        } else {
+            0
+        }
     }
 
     pub fn scroll_logs_up(&mut self) {
@@ -314,7 +441,7 @@ impl ServerState {
 impl TabFocus for ServerState {
     fn get_focused_element(&self) -> String {
         match self.focused_panel {
-            FocusedPanel::Profiles => "Profiles".to_string(),
+            FocusedPanel::CloudFolders => "Profiles".to_string(),
             FocusedPanel::ServerInfo => "ServerInfo".to_string(),
             FocusedPanel::ServerLogs => "ServerLogs".to_string(),
         }
@@ -322,16 +449,16 @@ impl TabFocus for ServerState {
 
     fn cycle_focus_forward(&mut self) {
         self.focused_panel = match self.focused_panel {
-            FocusedPanel::Profiles => FocusedPanel::ServerInfo,
+            FocusedPanel::CloudFolders => FocusedPanel::ServerInfo,
             FocusedPanel::ServerInfo => FocusedPanel::ServerLogs,
-            FocusedPanel::ServerLogs => FocusedPanel::Profiles,
+            FocusedPanel::ServerLogs => FocusedPanel::CloudFolders,
         };
     }
 
     fn cycle_focus_backward(&mut self) {
         self.focused_panel = match self.focused_panel {
-            FocusedPanel::Profiles => FocusedPanel::ServerLogs,
-            FocusedPanel::ServerInfo => FocusedPanel::Profiles,
+            FocusedPanel::CloudFolders => FocusedPanel::ServerLogs,
+            FocusedPanel::ServerInfo => FocusedPanel::CloudFolders,
             FocusedPanel::ServerLogs => FocusedPanel::ServerInfo,
         };
     }
@@ -340,7 +467,7 @@ impl TabFocus for ServerState {
         match key {
             KeyCode::Char('j') => {
                 match self.focused_panel {
-                    FocusedPanel::Profiles => self.navigate_profile_down(),
+                    FocusedPanel::CloudFolders => self.navigate_profile_down(),
                     FocusedPanel::ServerInfo => self.cycle_focus_forward(),
                     FocusedPanel::ServerLogs => self.scroll_logs_down(),
                 }
@@ -348,7 +475,7 @@ impl TabFocus for ServerState {
             }
             KeyCode::Char('k') => {
                 match self.focused_panel {
-                    FocusedPanel::Profiles => self.navigate_profile_up(),
+                    FocusedPanel::CloudFolders => self.navigate_profile_up(),
                     FocusedPanel::ServerInfo => self.cycle_focus_forward(),
                     FocusedPanel::ServerLogs => self.scroll_logs_up(),
                 }
@@ -357,8 +484,8 @@ impl TabFocus for ServerState {
             KeyCode::Char('g') => {
                 // Handle gg sequence (go to top)
                 match self.focused_panel {
-                    FocusedPanel::Profiles => {
-                        self.selected_profile_index = 0;
+                    FocusedPanel::CloudFolders => {
+                        self.selected_cloudfolder_index = 0;
                     }
                     FocusedPanel::ServerInfo => self.cycle_focus_forward(),
                     FocusedPanel::ServerLogs => self.scroll_logs_to_top(),
@@ -367,8 +494,8 @@ impl TabFocus for ServerState {
             }
             KeyCode::Char('G') => {
                 match self.focused_panel {
-                    FocusedPanel::Profiles => {
-                        self.selected_profile_index = self.profiles.len().saturating_sub(1);
+                    FocusedPanel::CloudFolders => {
+                        self.selected_cloudfolder_index = self.cloudfolders.len().saturating_sub(1);
                     }
                     FocusedPanel::ServerInfo => self.cycle_focus_forward(),
                     FocusedPanel::ServerLogs => self.scroll_logs_to_bottom(),
@@ -398,18 +525,47 @@ impl ServerState {
 
         match key {
             KeyCode::Enter => {
-                self.create_profile(&crate::config::Config::load_or_default());
+                if self.cloudfolder_input_field == CloudFolderInputField::Name {
+                    // Move to path field if name is not empty
+                    if !self.new_cloudfolder_name.trim().is_empty() {
+                        self.cloudfolder_input_field = CloudFolderInputField::Path;
+                    }
+                } else {
+                    // Try to create profile when in path field
+                    self.create_profile(&crate::config::Config::load_or_default());
+                }
             }
             KeyCode::Esc => {
-                self.cancel_creating_profile();
+                self.cancel_creating_cloudfolder();
+            }
+            KeyCode::Tab => {
+                // Switch between name and path fields
+                self.cloudfolder_input_field = match self.cloudfolder_input_field {
+                    CloudFolderInputField::Name => CloudFolderInputField::Path,
+                    CloudFolderInputField::Path => CloudFolderInputField::Name,
+                };
             }
             KeyCode::Char(c) => {
-                self.new_profile_name.push(c);
-                self.profile_creation_error = None; // Clear error when typing
+                match self.cloudfolder_input_field {
+                    CloudFolderInputField::Name => {
+                        self.new_cloudfolder_name.push(c);
+                    }
+                    CloudFolderInputField::Path => {
+                        self.new_cloudfolder_path.push(c);
+                    }
+                }
+                self.cloudfolder_creation_error = None; // Clear error when typing
             }
             KeyCode::Backspace => {
-                self.new_profile_name.pop();
-                self.profile_creation_error = None; // Clear error when editing
+                match self.cloudfolder_input_field {
+                    CloudFolderInputField::Name => {
+                        self.new_cloudfolder_name.pop();
+                    }
+                    CloudFolderInputField::Path => {
+                        self.new_cloudfolder_path.pop();
+                    }
+                }
+                self.cloudfolder_creation_error = None; // Clear error when editing
             }
             _ => {}
         }
