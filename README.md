@@ -19,7 +19,7 @@ cargo tui
 ./target/release/cloudhost-tui
 
 # Alternative: Build specific package
-# cargo build --release -p cloudhost-tui
+# cargo build --release -p cloudhost
 
 # Future UIs (when available)
 # cargo gui    # Desktop GUI
