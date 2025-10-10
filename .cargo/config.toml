@@ -1,0 +1,15 @@
+[alias]
+tui = "build --release -p cloudhost-tui"
+# gui = "build --release -p cloudhost-gui"
+# web = "build --release -p cloudhost-web"
+
+# Run aliases
+run-tui = "run --release -p cloudhost-tui"
+# run-gui = "run --release -p cloudhost-gui"
+# run-web = "run --release -p cloudhost-web"
+
+# Test aliases
+test-tui = "test -p cloudhost-tui"
+# test-gui = "test -p cloudhost-gui"
+# test-web = "test -p cloudhost-web"
+

@@ -14,13 +14,16 @@ Download the latest release from [GitHub Releases](https://github.com/StepanZagr
 git clone https://github.com/StepanZagray/CloudHost.git
 cd CloudHost
 
-# Build TUI (terminal interface)
-cargo build --release --bin cloudhost-tui
+# Build TUI (terminal interface) - EASY WAY
+cargo tui
 ./target/release/cloudhost-tui
 
+# Alternative: Build specific package
+# cargo build --release -p cloudhost-tui
+
 # Future UIs (when available)
-# cargo build --release --bin cloudhost-gui    # Desktop GUI
-# cargo build --release --bin cloudhost-web    # Web UI
+# cargo gui    # Desktop GUI
+# cargo web    # Web UI
 ```
 
 ### Option 3: Install via cargo

@@ -44,7 +44,7 @@ jobs:
     
     - name: Build CloudHost (TUI)
       run: |
-        cargo build --release --target ${{ matrix.target }} --bin cloudhost-tui
+        cargo build --release --target ${{ matrix.target }} -p cloudhost-tui
     
     - name: Create release artifacts
       run: |

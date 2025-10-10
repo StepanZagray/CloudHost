@@ -9,15 +9,6 @@ members = [
 ]
 resolver = "2"
 
-# Add convenience binaries for easier building
-[[bin]]
-name = "cloudhost-tui"
-path = "tui/src/main.rs"
-
-[[bin]]
-name = "cloudhost-server"
-path = "server/src/main.rs"
-
 [workspace.dependencies]
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
