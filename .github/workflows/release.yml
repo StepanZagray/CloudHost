@@ -17,7 +17,7 @@ jobs:
             artifact_name: cloudhost-linux
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: cloudhost-windows.exe
+            artifact_name: cloudhost-windows
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: cloudhost-macos
@@ -81,7 +81,7 @@ jobs:
       with:
         files: |
           artifacts/cloudhost-linux/cloudhost-tui
-          artifacts/cloudhost-windows.exe/cloudhost-tui.exe
+          artifacts/cloudhost-windows/cloudhost-tui.exe
           artifacts/cloudhost-macos/cloudhost-tui
         generate_release_notes: true
         draft: false
