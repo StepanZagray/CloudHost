@@ -6,7 +6,6 @@ use ratatui::{
     widgets::{Tabs, Widget},
 };
 use strum::IntoEnumIterator;
-use std::fs;
 use toml;
 
 use crate::tabs::{server, client, settings, SelectedTab, focus::TabFocus};
@@ -166,6 +165,44 @@ impl App {
         }
     }
 
+
+    fn complete_password_creation(&mut self) {
+        // Set the password
+        if let Some(ref mut server) = self.server_state.server {
+            if let Err(e) = server.set_password(&self.settings_state.password_input) {
+                self.settings_state.password_error = Some(format!("Failed to set password: {}", e));
+            } else {
+                self.settings_state.clear_password_creation_input();
+                self.settings_state.password_success = true;
+                self.add_debug("Password set successfully");
+                
+                // If server is running, restart it to pick up the new AuthState
+                let was_running = self.server_state.is_server_running();
+                let port = self.server_state.server_port;
+                
+                if was_running {
+                    self.add_debug("Stopping server to apply password changes");
+                    self.server_state.stop_server();
+                }
+                
+                // Recreate the server instance to pick up the new config
+                self.add_debug("Recreating server instance with new config");
+                self.server_state.server = Some(cloud_server::CloudServer::new());
+                
+                // If server was running, restart it automatically
+                if was_running {
+                    if let Some(server_port) = port {
+                        self.add_debug(&format!("Restarting server on port {}", server_port));
+                        self.server_state.start_server();
+                        self.add_debug("Server restart initiated with new password");
+                    }
+                }
+            }
+        } else {
+            self.settings_state.password_error = Some("Server not available".to_string());
+        }
+    }
+
     // Tab-specific navigation methods
     pub fn handle_tab_navigation(&mut self, key: ratatui::crossterm::event::KeyCode) -> bool {
         match self.selected_tab {
@@ -221,6 +258,18 @@ impl App {
         if self.server_state.creating_cloudfolder {
             self.server_state.handle_profile_input(key);
             return;
+        }
+
+        // Handle password creation modal
+        if self.settings_state.creating_password {
+            if self.settings_state.handle_password_input(key) {
+                // If password creation is complete, handle it
+                if self.settings_state.password_mode == crate::tabs::settings::models::PasswordMode::Confirming 
+                    && self.settings_state.password_input == self.settings_state.password_confirm {
+                    self.complete_password_creation();
+                }
+                return;
+            }
         }
 
         // Handle leader key sequences first
@@ -324,8 +373,9 @@ impl App {
                     self.server_state.start_server();
                 }
             }
-            "Create Profile" => self.server_state.start_creating_cloudfolder(),
-            "Delete Profile" => self.server_state.delete_selected_profile(),
+            "Create Cloud Folder" => self.server_state.start_creating_cloudfolder(),
+            "Delete cloud Folder" => self.server_state.delete_selected_profile(),
+            "Create Password" => self.settings_state.start_creating_password(),
                    "Cycle Focus Forward" => self.cycle_focus_forward(),
                    "Cycle Focus Backward" => self.cycle_focus_backward(),
                    "Navigate Up" => {
@@ -461,7 +511,14 @@ impl App {
                 if self.server_state.creating_cloudfolder {
                     "Type profile name and folder path, press Tab to switch fields, Enter to confirm, Esc to cancel"
                 } else {
-                    "↑↓ to navigate profiles | s to start/stop server | n to create profile | d to delete profile | q to quit"
+                    "j/k to navigate profiles | s to start/stop server | n to create profile | d to delete profile | q to quit"
+                }
+            }
+            SelectedTab::Settings => {
+                if self.settings_state.creating_password {
+                    "Type password, press Enter to confirm, Esc to cancel"
+                } else {
+                    "p to create password | q to quit"
                 }
             }
             _ => &format!(

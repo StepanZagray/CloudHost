@@ -1,30 +1,325 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Html,
+    Json,
 };
 use serde_json::json;
-use std::{
-    collections::HashMap,
-    fs,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, fs, sync::Arc};
 
-use crate::profile::CloudFolder;
+use crate::{auth::AuthState, cloud_folder::CloudFolder, server::ServerState};
 
-// Helper function to reduce redundant error handling
-fn get_cloudfolders_guard(
-    cloudfolders: &Arc<Mutex<HashMap<String, CloudFolder>>>,
-) -> Result<std::sync::MutexGuard<HashMap<String, CloudFolder>>, StatusCode> {
-    cloudfolders
+// Login page
+pub async fn login_page() -> Html<String> {
+    let html = r#"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CloudTUI Login</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 0; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+        .login-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .login-header h1 {
+            color: #333;
+            margin: 0;
+            font-size: 28px;
+        }
+        .login-header p {
+            color: #666;
+            margin: 10px 0 0 0;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: bold;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .login-button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .login-button:hover {
+            transform: translateY(-2px);
+        }
+        .error-message {
+            color: #e74c3c;
+            text-align: center;
+            margin-top: 15px;
+            padding: 10px;
+            background: #fdf2f2;
+            border-radius: 5px;
+            display: none;
+        }
+        .success-message {
+            color: #27ae60;
+            text-align: center;
+            margin-top: 15px;
+            padding: 10px;
+            background: #f0f9f0;
+            border-radius: 5px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>🌩️ CloudTUI</h1>
+            <p>Enter your password to access your cloud storage</p>
+        </div>
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit" class="login-button">Login</button>
+        </form>
+        <div id="errorMessage" class="error-message"></div>
+        <div id="successMessage" class="success-message"></div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('errorMessage');
+            const successDiv = document.getElementById('successMessage');
+            
+            // Hide previous messages
+            errorDiv.style.display = 'none';
+            successDiv.style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ password: password })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    // Store token in cookie
+                    document.cookie = `auth_token=${data.token}; path=/; max-age=86400`; // 24 hours
+                    successDiv.textContent = 'Login successful! Redirecting...';
+                    successDiv.style.display = 'block';
+                    
+                    // Redirect to home page
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    const error = await response.message.text();
+                    errorDiv.textContent = error;
+                    errorDiv.style.display = 'block';
+                }
+            } catch (error) {
+                errorDiv.textContent = 'Login failed. Please try again.';
+                errorDiv.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
+    "#;
+    Html(html.to_string())
+}
+
+// Login API endpoint
+pub async fn login(
+    State(server_state): State<ServerState>,
+    Json(login_request): Json<crate::auth::LoginRequest>,
+) -> Result<Json<crate::auth::LoginResponse>, (StatusCode, axum::Json<serde_json::Value>)> {
+    // Verify password
+    let auth_state = get_authentication_state(&server_state);
+    if auth_state.verify_password(&login_request.password) {
+        // Generate JWT token
+        if let Ok(token) = auth_state.generate_token() {
+            return Ok(Json(crate::auth::LoginResponse { token }));
+        }
+    }
+
+    // Return proper error response for incorrect password
+    Err((
+        StatusCode::UNAUTHORIZED,
+        axum::Json(json!({
+            "error": "Invalid credentials",
+            "message": "Incorrect password. Please try again."
+        })),
+    ))
+}
+
+// Helper function to acquire lock on cloudfolders collection
+fn acquire_cloudfolders_lock(
+    server_state: &ServerState,
+) -> Result<std::sync::MutexGuard<'_, HashMap<String, CloudFolder>>, StatusCode> {
+    server_state
+        .cloudfolders
         .lock()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
+// Helper function to get authentication state from server state
+fn get_authentication_state(server_state: &ServerState) -> &Arc<AuthState> {
+    &server_state.auth_state
+}
+
+// Checks if request has valid authentication token
+fn has_valid_token(headers: &HeaderMap, auth_state: &AuthState) -> bool {
+    // Check Authorization header
+    if let Some(auth_header) = headers.get("Authorization") {
+        if let Ok(auth_str) = auth_header.to_str() {
+            if auth_str.starts_with("Bearer ") {
+                let token = &auth_str[7..];
+                if auth_state.verify_token(token).is_ok() {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Check cookies
+    if let Some(cookie_header) = headers.get("Cookie") {
+        if let Ok(cookie_str) = cookie_header.to_str() {
+            for cookie in cookie_str.split(';') {
+                let cookie = cookie.trim();
+                if cookie.starts_with("auth_token=") {
+                    let token = &cookie[11..];
+                    if auth_state.verify_token(token).is_ok() {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
+// Detects if request is from an API client (vs web browser)
+fn is_api_client(headers: &HeaderMap) -> bool {
+    // Check for JSON content type
+    if let Some(content_type) = headers.get("Content-Type") {
+        if let Ok(content_type_str) = content_type.to_str() {
+            if content_type_str.contains("application/json") {
+                return true;
+            }
+        }
+    }
+
+    // Check for JSON accept header
+    if let Some(accept) = headers.get("Accept") {
+        if let Ok(accept_str) = accept.to_str() {
+            if accept_str.contains("application/json") {
+                return true;
+            }
+        }
+    }
+
+    // Check for Authorization header (API clients typically use this)
+    if headers.get("Authorization").is_some() {
+        return true;
+    }
+
+    false
+}
+
+// Verifies authentication and returns appropriate error response if unauthorized
+fn verify_authentication(
+    headers: &HeaderMap,
+    auth_state: &AuthState,
+) -> Result<(), (StatusCode, axum::Json<serde_json::Value>)> {
+    if has_valid_token(headers, auth_state) {
+        return Ok(());
+    }
+
+    let error_response = if is_api_client(headers) {
+        (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(json!({
+                "error": "Unauthorized",
+                "message": "Authentication required. Please provide a valid JWT token.",
+                "login_url": "/api/login"
+            })),
+        )
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(json!({
+                "error": "Unauthorized",
+                "message": "Please login to access this resource.",
+                "redirect_to": "/login"
+            })),
+        )
+    };
+
+    Err(error_response)
+}
+
 pub async fn index(
-    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
-) -> Result<Html<String>, StatusCode> {
-    let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+    State(server_state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Html<String>, (StatusCode, axum::Json<serde_json::Value>)> {
+    // Check authentication
+    let auth_state = get_authentication_state(&server_state);
+    match verify_authentication(&headers, auth_state) {
+        Ok(()) => (),
+        Err(error_response) => return Err(error_response),
+    }
+
+    let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(json!({
+                "error": "Internal Server Error",
+                "message": "Failed to access cloud folders"
+            })),
+        )
+    })?;
     let cloudfolder_list: Vec<&CloudFolder> = cloudfolders_guard.values().collect();
 
     let cloudfolders_html = if cloudfolder_list.is_empty() {
@@ -99,9 +394,25 @@ pub async fn index(
 }
 
 pub async fn status(
-    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
-) -> Result<axum::Json<serde_json::Value>, StatusCode> {
-    let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+    State(server_state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<axum::Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    // Check authentication
+    let auth_state = get_authentication_state(&server_state);
+    match verify_authentication(&headers, auth_state) {
+        Ok(()) => (),
+        Err(error_response) => return Err(error_response),
+    }
+
+    let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(json!({
+                "error": "Internal Server Error",
+                "message": "Failed to access cloud folders"
+            })),
+        )
+    })?;
     let cloudfolder_list: Vec<&CloudFolder> = cloudfolders_guard.values().collect();
 
     let status = json!({
@@ -119,9 +430,25 @@ pub async fn status(
 }
 
 pub async fn get_cloudfolders_list(
-    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
-) -> Result<axum::Json<serde_json::Value>, StatusCode> {
-    let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+    State(server_state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<axum::Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    // Check authentication
+    let auth_state = get_authentication_state(&server_state);
+
+    match verify_authentication(&headers, auth_state) {
+        Ok(()) => (),
+        Err(error_response) => return Err(error_response),
+    }
+    let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(json!({
+                "error": "Internal Server Error",
+                "message": "Failed to access cloud folders"
+            })),
+        )
+    })?;
     let cloudfolder_list: Vec<&CloudFolder> = cloudfolders_guard.values().collect();
 
     let cloudfolders_json = cloudfolder_list
@@ -142,14 +469,34 @@ pub async fn get_cloudfolders_list(
 }
 
 pub async fn show_cloudfolder_info(
-    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
+    State(server_state): State<ServerState>,
     Path(cloudfolder_name): Path<String>,
-) -> Result<Html<String>, StatusCode> {
-    let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+    headers: HeaderMap,
+) -> Result<Html<String>, (StatusCode, axum::Json<serde_json::Value>)> {
+    // Check authentication
+    let auth_state = get_authentication_state(&server_state);
+    match verify_authentication(&headers, auth_state) {
+        Ok(()) => (),
+        Err(error_response) => return Err(error_response),
+    }
 
-    let cloudfolder = cloudfolders_guard
-        .get(&cloudfolder_name)
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(json!({
+                "error": "Internal Server Error",
+                "message": "Failed to access cloud folders"
+            })),
+        )
+    })?;
+
+    let cloudfolder = cloudfolders_guard.get(&cloudfolder_name).ok_or((
+        StatusCode::NOT_FOUND,
+        axum::Json(json!({
+            "error": "Not Found",
+            "message": "Cloud folder not found"
+        })),
+    ))?;
 
     let html = format!(
         r#"
@@ -178,13 +525,11 @@ pub async fn show_cloudfolder_info(
     <body>
         <div class="container">
             <div class="header">
-                <h1>🌩️ CloudTUI - {}</h1>
-                <p>Cloud Folder: {}</p>
+                <h1>🌩️ CloudTUI</h1>
             </div>
             <div class="cloudfolder-info">
                 <h2>Cloud Folder Information</h2>
                 <p><strong>Name:</strong> {}</p>
-                <p><strong>Path:</strong> {}</p>
                 <p><strong>Created:</strong> {}</p>
             </div>
             <div class="actions">
@@ -198,29 +543,54 @@ pub async fn show_cloudfolder_info(
     "#,
         cloudfolder.name,
         cloudfolder.name,
-        cloudfolder.name,
-        cloudfolder.folder_path.display(),
         cloudfolder.created_at.format("%Y-%m-%d %H:%M:%S"),
         cloudfolder.name,
-        cloudfolder.name
     );
 
     Ok(Html(html))
 }
 #[axum::debug_handler]
 pub async fn list_cloudfolder_files(
-    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
+    State(server_state): State<ServerState>,
     Path(cloudfolder_name): Path<String>,
-) -> Result<Html<String>, StatusCode> {
+    headers: HeaderMap,
+) -> Result<Html<String>, (StatusCode, axum::Json<serde_json::Value>)> {
+    // Check authentication
+    let auth_state = get_authentication_state(&server_state);
+    match verify_authentication(&headers, auth_state) {
+        Ok(()) => (),
+        Err(error_response) => return Err(error_response),
+    }
     let cloudfolder = {
-        let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+        let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(json!({
+                    "error": "Internal Server Error",
+                    "message": "Failed to access cloud folders"
+                })),
+            )
+        })?;
         cloudfolders_guard
             .get(&cloudfolder_name)
-            .ok_or(StatusCode::NOT_FOUND)?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                axum::Json(json!({
+                    "error": "Not Found",
+                    "message": "Cloud folder not found"
+                })),
+            ))?
             .clone()
     };
 
-    browse_directory_internal(cloudfolder, "".to_string()).await
+    browse_directory_internal(cloudfolder, "".to_string())
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(json!({"error": "File listing error", "message": e.to_string()})),
+            )
+        })
 }
 
 async fn browse_directory_internal(
@@ -241,7 +611,7 @@ async fn browse_directory_internal(
 
     // If it's a file, redirect to the static file service
     if full_path.is_file() {
-        let redirect_url = format!("/static/{}", requested_path);
+        let redirect_url = format!("/{}/static/{}", cloudfolder.name, requested_path);
         return Ok(Html(format!(
             r#"<html><head><meta http-equiv="refresh" content="0; url={}"></head><body>Redirecting to file...</body></html>"#,
             redirect_url
@@ -268,11 +638,17 @@ async fn browse_directory_internal(
             }
         };
 
+        let item_path = if requested_path.is_empty() {
+            file_name.clone()
+        } else {
+            format!("{}/{}", requested_path, file_name)
+        };
+
         items.push(json!({
             "name": file_name,
             "is_directory": is_dir,
             "size": size,
-            "path": requested_path.clone() + "/" + &file_name
+            "path": item_path
         }));
     }
 
@@ -328,7 +704,7 @@ async fn browse_directory_internal(
             </div>
             
             <div class="breadcrumb">
-                <a href="/files">📁 Root</a>
+                <a href="/{}/files">📁 Root</a>
                 {}
             </div>
             
@@ -342,34 +718,71 @@ async fn browse_directory_internal(
     "#,
         requested_path,
         cloudfolder.name,
-        generate_breadcrumb(&requested_path),
-        generate_file_list(&items)
+        cloudfolder.name,
+        generate_breadcrumb(&requested_path, &cloudfolder.name),
+        generate_file_list(&items, &cloudfolder.name)
     );
 
     Ok(Html(html))
 }
 
 pub async fn browse_file_or_directory(
-    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
+    State(server_state): State<ServerState>,
     Path((cloudfolder_name, path)): Path<(String, String)>,
-) -> Result<Html<String>, StatusCode> {
+    headers: HeaderMap,
+) -> Result<Html<String>, (StatusCode, axum::Json<serde_json::Value>)> {
+    // Check authentication
+    let auth_state = get_authentication_state(&server_state);
+    match verify_authentication(&headers, auth_state) {
+        Ok(()) => (),
+        Err(error_response) => return Err(error_response),
+    }
     let cloudfolder = {
-        let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+        let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(json!({
+                    "error": "Internal Server Error",
+                    "message": "Failed to access cloud folders"
+                })),
+            )
+        })?;
         cloudfolders_guard
             .get(&cloudfolder_name)
-            .ok_or(StatusCode::NOT_FOUND)?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                axum::Json(json!({
+                    "error": "Not Found",
+                    "message": "Cloud folder not found"
+                })),
+            ))?
             .clone()
     };
 
     let full_path = cloudfolder.folder_path.join(&path);
 
     if !full_path.exists() {
-        return Err(StatusCode::NOT_FOUND);
+        return Err((
+            StatusCode::NOT_FOUND,
+            axum::Json(json!({
+                "error": "Not Found",
+                "message": format!("Path not found: {}", path)
+            })),
+        ));
     }
 
     if full_path.is_dir() {
         // It's a directory, show directory listing
-        browse_directory_internal(cloudfolder, path).await
+        browse_directory_internal(cloudfolder, path)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(
+                        json!({"error": "Directory browsing error", "message": e.to_string()}),
+                    ),
+                )
+            })
     } else {
         // It's a file, show a download link instead of serving directly
         let file_name = full_path
@@ -425,14 +838,35 @@ pub async fn browse_file_or_directory(
 }
 
 pub async fn download_file(
-    State(cloudfolders): State<Arc<Mutex<HashMap<String, CloudFolder>>>>,
+    State(server_state): State<ServerState>,
     Path((cloudfolder_name, file_path)): Path<(String, String)>,
-) -> Result<axum::response::Response, StatusCode> {
+    headers: HeaderMap,
+) -> Result<axum::response::Response, (StatusCode, axum::Json<serde_json::Value>)> {
+    // Check authentication
+    let auth_state = get_authentication_state(&server_state);
+    match verify_authentication(&headers, auth_state) {
+        Ok(()) => (),
+        Err(error_response) => return Err(error_response),
+    }
     let cloudfolder = {
-        let cloudfolders_guard = get_cloudfolders_guard(&cloudfolders)?;
+        let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(json!({
+                    "error": "Internal Server Error",
+                    "message": "Failed to access cloud folders"
+                })),
+            )
+        })?;
         cloudfolders_guard
             .get(&cloudfolder_name)
-            .ok_or(StatusCode::NOT_FOUND)?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                axum::Json(json!({
+                    "error": "Not Found",
+                    "message": "Cloud folder not found"
+                })),
+            ))?
             .clone()
     };
 
@@ -440,11 +874,23 @@ pub async fn download_file(
 
     // Security check: ensure the requested path is within the cloudfolder directory
     if !full_path.starts_with(&cloudfolder.folder_path) {
-        return Err(StatusCode::FORBIDDEN);
+        return Err((
+            StatusCode::FORBIDDEN,
+            axum::Json(json!({
+                "error": "Forbidden",
+                "message": "Access denied to this path"
+            })),
+        ));
     }
 
     if !full_path.exists() || !full_path.is_file() {
-        return Err(StatusCode::NOT_FOUND);
+        return Err((
+            StatusCode::NOT_FOUND,
+            axum::Json(json!({
+                "error": "Not Found",
+                "message": format!("File not found: {}", file_path)
+            })),
+        ));
     }
 
     // Read the file and serve it
@@ -467,13 +913,19 @@ pub async fn download_file(
                     ),
                 )
                 .body(content.into())
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(json!({"error": "Response build error", "message": "Failed to build file response"}))))?)
         }
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(_) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(json!({
+                "error": "File read error",
+                "message": "Failed to read file content"
+            })),
+        )),
     }
 }
 
-fn generate_breadcrumb(path: &str) -> String {
+fn generate_breadcrumb(path: &str, cloudfolder_name: &str) -> String {
     if path.is_empty() {
         return String::new();
     }
@@ -490,15 +942,15 @@ fn generate_breadcrumb(path: &str) -> String {
             breadcrumb.push_str(" / ");
         }
         breadcrumb.push_str(&format!(
-            "<a href=\"/files{}\">📁 {}</a>",
-            current_path, part
+            "<a href=\"/{}/files{}\">📁 {}</a>",
+            cloudfolder_name, current_path, part
         ));
     }
 
     breadcrumb
 }
 
-fn generate_file_list(items: &[serde_json::Value]) -> String {
+fn generate_file_list(items: &[serde_json::Value], cloudfolder_name: &str) -> String {
     if items.is_empty() {
         return "<p>📭 This directory is empty</p>".to_string();
     }
@@ -514,9 +966,9 @@ fn generate_file_list(items: &[serde_json::Value]) -> String {
         let class = if is_dir { "directory" } else { "" };
 
         let link_url = if is_dir {
-            format!("/files/{}", path)
+            format!("/{}/files/{}", cloudfolder_name, path)
         } else {
-            format!("/static/{}", path)
+            format!("/{}/static/{}", cloudfolder_name, path)
         };
 
         html.push_str(&format!(

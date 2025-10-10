@@ -16,6 +16,9 @@ server_config_path = "~/.cloudtui/server.toml"
 "n" = { action = "Create Cloud Folder", tab = "server" }
 "d" = { action = "Delete Cloud Folder", tab = "server" }
 
+# Settings tab keybindings
+"p" = { action = "Create Password", tab = "settings" }
+
 # Focus management (works in all tabs)
 "<Tab>" = { action = "Cycle Focus Forward", tab = "any" }
 "<S-Tab>" = { action = "Cycle Focus Backward", tab = "any" }

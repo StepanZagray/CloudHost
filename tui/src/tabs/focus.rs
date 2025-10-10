@@ -15,9 +15,11 @@ pub trait TabFocus {
     fn handle_navigation(&mut self, key: KeyCode) -> bool;
 
     /// Check if this tab has focusable elements
+    #[allow(dead_code)]
     fn has_focusable_elements(&self) -> bool;
 
     /// Get the number of focusable elements in this tab
+    #[allow(dead_code)]
     fn focusable_elements_count(&self) -> usize;
 }
 

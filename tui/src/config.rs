@@ -48,7 +48,7 @@ impl Default for Config {
         keybindings.insert(
             "n".to_string(),
             Keybinding {
-                action: "Create Profile".to_string(),
+                action: "Create Cloud Folder".to_string(),
                 tab: "server".to_string(),
             },
         );
@@ -66,6 +66,13 @@ impl Default for Config {
                 tab: "server".to_string(),
             },
         );
+        keybindings.insert(
+            "p".to_string(),
+            Keybinding {
+                action: "Create Password".to_string(),
+                tab: "settings".to_string(),
+            },
+        );
 
         Self {
             leader: " ".to_string(),
@@ -77,22 +84,26 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        // Try multiple possible locations for config.toml
+        // Try multiple possible locations for TUI config.toml
         let possible_paths = [
+            "tui/config.toml",
+            "./tui/config.toml",
             "config.toml",
             "./config.toml",
-            "../config.toml",
-            "tui/config.toml",
         ];
 
         for path in &possible_paths {
             if let Ok(config_str) = std::fs::read_to_string(path) {
-                let config: Config = toml::from_str(&config_str)?;
-                return Ok(config);
+                // Try to parse as TUI config
+                if let Ok(config) = toml::from_str::<Config>(&config_str) {
+                    return Ok(config);
+                }
+                // If it fails, it might be a server config file, so skip it
+                continue;
             }
         }
 
-        Err("Could not find config.toml in any expected location".into())
+        Err("Could not find valid TUI config.toml in any expected location".into())
     }
 
     pub fn load_or_default() -> Self {

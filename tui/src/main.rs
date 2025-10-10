@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 mod config;
+mod error;
 mod models;
 mod tabs;
 use models::App;

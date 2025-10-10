@@ -72,18 +72,14 @@ impl ServerState {
     pub fn new_with_config(config: &ServerConfig) -> Self {
         let mut state = Self::default();
         state.load_cloudfolders_with_config(config);
+        state.server = Some(CloudServer::new());
         state
     }
-
     pub fn start_creating_cloudfolder(&mut self) {
         self.creating_cloudfolder = true;
-        self.new_cloudfolder_name = String::new();
-        self.new_cloudfolder_path = String::new();
-        self.cloudfolder_input_field = CloudFolderInputField::Name;
-        self.cloudfolder_creation_error = None;
     }
 
-    pub fn cancel_creating_cloudfolder(&mut self) {
+    pub fn clear_cloudfolder_creation_input(&mut self) {
         self.creating_cloudfolder = false;
         self.new_cloudfolder_name = String::new();
         self.new_cloudfolder_path = String::new();
@@ -91,7 +87,7 @@ impl ServerState {
         self.cloudfolder_creation_error = None;
     }
 
-    pub fn create_profile(&mut self, _config: &crate::config::Config) {
+    pub fn create_cloudfolder(&mut self, _config: &crate::config::Config) {
         let name = self.new_cloudfolder_name.trim();
         let folder_path = self.new_cloudfolder_path.trim();
 
@@ -143,18 +139,31 @@ impl ServerState {
         self.cloudfolders.push(cloudfolder);
         self.save_cloudfolders_to_toml();
 
-        self.creating_cloudfolder = false;
-        self.new_cloudfolder_name = String::new();
-        self.new_cloudfolder_path = String::new();
-        self.cloudfolder_input_field = CloudFolderInputField::Name;
-        self.cloudfolder_creation_error = None;
+        self.clear_cloudfolder_creation_input();
     }
 
     pub fn start_server(&mut self) {
+        // Check if server instance exists
+        if self.server.is_none() {
+            self.add_server_log("❌ Server instance not available - creating new instance");
+            self.server = Some(CloudServer::new());
+        }
+
         // Check if server is already running
-        if self.server.is_some() {
-            self.add_server_log("⚠️ Server is already running");
-            return;
+        if let Some(ref server) = self.server {
+            if server.is_running() {
+                self.add_server_log("⚠️ Server is already running");
+                return;
+            }
+        }
+
+        // Check if password is set
+        if let Some(ref server) = self.server {
+            if !server.has_password() {
+                self.add_server_log("❌ Cannot start server: No password set");
+                self.add_server_log("💡 Go to Settings tab and press 'p' to create a password");
+                return;
+            }
         }
 
         // Verify all cloudfolders have valid paths
@@ -177,55 +186,57 @@ impl ServerState {
         }
 
         let port = 3000; // Fixed port for single server
-        let mut server = CloudServer::new();
 
-        // Add all cloudfolders to the server
-        for cloudfolder in &self.cloudfolders {
-            let server_cloudfolder =
-                ServerCloudFolder::new(cloudfolder.name.clone(), cloudfolder.folder_path.clone());
-            server.add_cloudfolder(server_cloudfolder);
-        }
-
-        match server.start_server(port) {
-            Ok(_) => {
-                self.server = Some(server);
-                self.server_port = Some(port);
-
-                self.add_server_log("🚀 Starting CloudTUI server");
-                self.add_server_log(&format!("🌐 Server started on http://127.0.0.1:{}", port));
-                self.add_server_log(&format!(
-                    "📊 Serving {} cloudfolders",
-                    self.cloudfolders.len()
-                ));
-
-                let log_messages: Vec<String> = self
-                    .cloudfolders
-                    .iter()
-                    .map(|cloudfolder| {
-                        format!(
-                            "📁 Cloud Folder '{}': http://127.0.0.1:{}/{}",
-                            cloudfolder.name, port, cloudfolder.name
-                        )
-                    })
-                    .collect();
-
-                for message in log_messages {
-                    self.add_server_log(&message);
-                }
-
-                self.add_server_log(&format!(
-                    "🔗 Server status: http://127.0.0.1:{}/api/status",
-                    port
-                ));
+        if let Some(ref mut server) = self.server {
+            // Add all cloudfolders to the server
+            for cloudfolder in &self.cloudfolders {
+                let server_cloudfolder = ServerCloudFolder::new(
+                    cloudfolder.name.clone(),
+                    cloudfolder.folder_path.clone(),
+                );
+                server.add_cloudfolder(server_cloudfolder);
             }
-            Err(e) => {
-                self.add_server_log(&format!("❌ Failed to start server: {}", e));
+
+            match server.start_server(port) {
+                Ok(_) => {
+                    self.server_port = Some(port);
+
+                    self.add_server_log("🚀 Starting CloudTUI server");
+                    self.add_server_log(&format!("🌐 Server started on http://127.0.0.1:{}", port));
+                    self.add_server_log(&format!(
+                        "📊 Serving {} cloudfolders",
+                        self.cloudfolders.len()
+                    ));
+
+                    let log_messages: Vec<String> = self
+                        .cloudfolders
+                        .iter()
+                        .map(|cloudfolder| {
+                            format!(
+                                "📁 Cloud Folder '{}': http://127.0.0.1:{}/{}",
+                                cloudfolder.name, port, cloudfolder.name
+                            )
+                        })
+                        .collect();
+
+                    for message in log_messages {
+                        self.add_server_log(&message);
+                    }
+
+                    self.add_server_log(&format!(
+                        "🔗 Server status: http://127.0.0.1:{}/api/status",
+                        port
+                    ));
+                }
+                Err(e) => {
+                    self.add_server_log(&format!("❌ Failed to start server: {}", e));
+                }
             }
         }
     }
 
     pub fn stop_server(&mut self) {
-        if let Some(mut server) = self.server.take() {
+        if let Some(ref mut server) = self.server {
             let port = self.server_port.take();
             server.stop_server();
 
@@ -401,19 +412,11 @@ impl ServerState {
     }
 
     pub fn is_server_running(&self) -> bool {
-        self.server.is_some()
+        self.server.as_ref().map_or(false, |s| s.is_running())
     }
 
     pub fn get_server_port(&self) -> Option<u16> {
         self.server_port
-    }
-
-    pub fn get_running_servers_count(&self) -> usize {
-        if self.server.is_some() {
-            1
-        } else {
-            0
-        }
     }
 
     pub fn scroll_logs_up(&mut self) {
@@ -532,11 +535,11 @@ impl ServerState {
                     }
                 } else {
                     // Try to create profile when in path field
-                    self.create_profile(&crate::config::Config::load_or_default());
+                    self.create_cloudfolder(&crate::config::Config::load_or_default());
                 }
             }
             KeyCode::Esc => {
-                self.cancel_creating_cloudfolder();
+                self.clear_cloudfolder_creation_input();
             }
             KeyCode::Tab => {
                 // Switch between name and path fields

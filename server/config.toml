@@ -1,7 +1,5 @@
-# CloudTUI Server Configuration
-
-# Path where cloud folders are stored
 cloudfolders_path = "~/.cloudtui/cloudfolders"
-
-# Server port
 server_port = 3000
+password_hash = "$2b$12$DAfFlIDYAnoUi0ETdU4vB.lmFKuFQpeg4ymUnEhEQEypIh5D8Rwt6"
+password_changed_at = "2025-10-10T17:27:26.642589600Z"
+jwt_secret = "cloudtui-secret-9eaf3eca0f02680b"

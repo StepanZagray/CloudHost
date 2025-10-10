@@ -53,9 +53,9 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
 
     // Add focus indicator to title
     let profile_title = if app.server_state.focused_panel == FocusedPanel::CloudFolders {
-        "Profiles (FOCUSED)"
+        "Cloud folders (FOCUSED)"
     } else {
-        "Profiles"
+        "Cloud folders"
     };
 
     let profile_list = List::new(profile_items)
@@ -89,7 +89,6 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
         "🔴 Not Running".to_string()
     };
 
-    let running_servers_count = app.server_state.get_running_servers_count();
     let server_info = if let Some(profile) = app
         .server_state
         .cloudfolders
@@ -106,12 +105,11 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
         };
 
         format!(
-            "Selected Profile: {}\nPath: {}\nURL: {}\nTo add files to this profile, add them to the profile folder manually\nStatus: {}\n\nRunning Servers: {}",
+            "Selected Profile: {}\nPath: {}\nURL: {}\nTo add files to this profile, add them to the profile folder manually\nStatus: {}",
             profile.name,
             profile.folder_path.display(),
             profile_url,
             server_status,
-            running_servers_count
         )
     } else {
         "No cloudfolders available".to_string()
