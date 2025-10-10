@@ -1,5 +1,5 @@
 [package]
-name = "cloudtui"
+name = "cloudhost"
 version = "0.1.0"
 edition = "2021"
 
@@ -19,5 +19,5 @@ uuid = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 dirs = "5.0"
-cloud-server = { path = "../server" }
+cloudhost-server = { path = "../server" }
 tracing-subscriber = "0.3"

@@ -66,7 +66,7 @@ impl App {
         }
     }
 
-    fn load_server_config(server_config_path: &str) -> cloud_server::ServerConfig {
+    fn load_server_config(server_config_path: &str) -> cloudhost_server::ServerConfig {
         let expanded_path = if server_config_path.starts_with("~/") {
             if let Some(home) = dirs::home_dir() {
                 home.join(&server_config_path[2..])
@@ -78,13 +78,13 @@ impl App {
         };
 
         if let Ok(content) = std::fs::read_to_string(&expanded_path) {
-            if let Ok(server_config) = toml::from_str::<cloud_server::ServerConfig>(&content) {
+            if let Ok(server_config) = toml::from_str::<cloudhost_server::ServerConfig>(&content) {
                 return server_config;
             }
         }
 
         // Return default config if file doesn't exist or is invalid
-        cloud_server::ServerConfig::default()
+        cloudhost_server::ServerConfig::default()
     }
 
     pub fn next_tab(&mut self) {
@@ -187,7 +187,7 @@ impl App {
                 
                 // Recreate the server instance to pick up the new config
                 self.add_debug("Recreating server instance with new config");
-                self.server_state.server = Some(cloud_server::CloudServer::new());
+                self.server_state.server = Some(cloudhost_server::CloudServer::new());
                 
                 // If server was running, restart it automatically
                 if was_running {

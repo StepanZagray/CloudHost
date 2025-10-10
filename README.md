@@ -1,12 +1,39 @@
-# CloudTUI App
+# CloudHost
 
-A terminal-based application to locally serve files.
+A file server that helps users host their files locally. 
 
+Currently features a terminal user interface (TUI) with more interfaces and features planned for the future.
 
-## How to use
+## Installation
 
+### Option 1: Pre-built binary (Recommended)
+Download the latest release from [GitHub Releases](https://github.com/StepanZagray/CloudHost/releases)
+
+### Option 2: Build from source
+```bash
+git clone https://github.com/StepanZagray/CloudHost.git
+cd CloudHost
+
+# Build TUI (terminal interface)
+cargo build --release --bin cloudhost-tui
+./target/release/cloudhost-tui
+
+# Future UIs (when available)
+# cargo build --release --bin cloudhost-gui    # Desktop GUI
+# cargo build --release --bin cloudhost-web    # Web UI
 ```
-git clone https://github.com/StepanZagray/CloudTUI.git
-cd CloudTUI
-cargo run
+
+### Option 3: Install via cargo
+```bash
+cargo install --git https://github.com/StepanZagray/CloudHost.git --bin cloudhost-tui
+cloudhost-tui
 ```
+
+## Setup
+
+1. Create cloud folders (virtual links to local directories)
+2. Set password in Settings tab
+3. Start server from Server tab
+4. Access via browser at the provided URL
+
+

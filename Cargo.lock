@@ -311,7 +311,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "cloud-server"
+name = "cloudhost"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "cloudhost-server",
+ "color-eyre",
+ "crossterm 0.29.0",
+ "dirs",
+ "env_logger",
+ "log",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "tokio",
+ "toml",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "cloudhost-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -328,29 +351,6 @@ dependencies = [
  "tower 0.4.13",
  "tower-http",
  "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "cloudtui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "cloud-server",
- "color-eyre",
- "crossterm 0.29.0",
- "dirs",
- "env_logger",
- "log",
- "ratatui",
- "serde",
- "serde_json",
- "strum 0.27.2",
- "strum_macros 0.27.2",
- "tokio",
- "toml",
  "tracing-subscriber",
  "uuid",
 ]

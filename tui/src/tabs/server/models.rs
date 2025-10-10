@@ -1,5 +1,5 @@
 use crate::tabs::focus::TabFocus;
-use cloud_server::{CloudFolder as ServerCloudFolder, CloudServer, ServerConfig};
+use cloudhost_server::{CloudFolder as ServerCloudFolder, CloudServer, ServerConfig};
 use ratatui::crossterm::event::KeyCode;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
