@@ -29,7 +29,7 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            cloudfolders_path: "~/.cloudtui/cloudfolders".to_string(),
+            cloudfolders_path: "~/.cloudhost/cloudfolders".to_string(),
             server_port: 3000,
             password_hash: None,
             password_changed_at: None,

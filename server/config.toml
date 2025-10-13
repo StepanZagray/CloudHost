@@ -1,5 +1,5 @@
-cloudfolders_path = "~/.cloudtui/cloudfolders"
+cloudfolders_path = "~/.cloudhost/cloudfolders"
 server_port = 3000
-password_hash = "$2b$12$DAfFlIDYAnoUi0ETdU4vB.lmFKuFQpeg4ymUnEhEQEypIh5D8Rwt6"
-password_changed_at = "2025-10-10T17:27:26.642589600Z"
-jwt_secret = "cloudtui-secret-9eaf3eca0f02680b"
+password_hash = "$2b$12$Kk/BoZorZMjoCk3EW2sUmeDOhDO30I8jxmjyquVf0avtk18mhEnQO"
+password_changed_at = "2025-10-13T12:00:12.652627900Z"
+jwt_secret = "cloudtui-secret-8d8969910b1f805b"

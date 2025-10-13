@@ -151,8 +151,8 @@ impl CloudServer {
             .route("/", get(routes::index))
             .route("/login", get(routes::login_page))
             .route("/api/login", post(routes::login))
-            .route("/api/status", get(routes::status))
-            .route("/api/cloudfolders", get(routes::get_cloudfolders_list))
+            .route("/api/status", get(routes::api_index))
+            .route("/api/cloudfolders", get(routes::api_index))
             .route("/:cloudfolder_name", get(routes::show_cloudfolder_info))
             .route(
                 "/:cloudfolder_name/files",
@@ -164,7 +164,7 @@ impl CloudServer {
             )
             .route(
                 "/:cloudfolder_name/static/*path",
-                get(routes::download_file),
+                get(routes::browse_file_or_directory),
             )
             .layer(CorsLayer::permissive())
             .with_state(server_state);

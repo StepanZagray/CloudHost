@@ -2,7 +2,7 @@
 leader = " "
 
 # Server configuration path
-server_config_path = "~/.cloudtui/server.toml"
+server_config_path = "~/.cloudhost/server.toml"
 
 [keybindings]
 # Global keybindings (work in any tab)

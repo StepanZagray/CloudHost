@@ -38,7 +38,7 @@ pub struct DebugStream {
 
 impl DebugStream {
     pub fn new(max_messages: usize) -> Self {
-        let (sender, _) = broadcast::channel(1000); // Buffer up to 1000 messages
+        let (sender, _) = broadcast::channel(max_messages); // Buffer up to 1000 messages
 
         Self {
             sender,

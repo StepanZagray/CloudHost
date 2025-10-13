@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
     // tracing_subscriber::fmt::init();
 
     // Initialize debug stream for server-to-TUI communication
-    init_debug_stream(100); // Keep last 100 messages
+    init_debug_stream(1000); // Keep last 1000 messages
 
     let terminal = ratatui::init();
     let mut app = App::new();
