@@ -213,7 +213,7 @@ pub fn render_server_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
     app.server_state.server_logs_list_state = list_state;
 
     // Render scrollbar
-    let mut scroll_state = app.server_state.server_logs_scroll_state.clone();
+    let mut scroll_state = app.server_state.server_logs_scroll_state;
     scroll_state = scroll_state.content_length(visible_logs.len());
     if let Some(selected) = app.server_state.server_logs_list_state.selected() {
         scroll_state = scroll_state.position(selected);
