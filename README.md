@@ -47,3 +47,9 @@ cloudhost-tui
 4. Access via provided link by output of step 3
 
 
+
+## To-Do features:
+- upload functionality
+- users with different permissions(look, download, upload)
+- make it possible to share cloudfolders on several devices, and sync files between them
+
