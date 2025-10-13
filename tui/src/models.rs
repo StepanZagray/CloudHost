@@ -8,7 +8,7 @@ use ratatui::{
 use strum::IntoEnumIterator;
 use toml;
 
-use crate::tabs::{server, client, settings, SelectedTab, focus::TabFocus};
+use crate::tabs::{client, focus::TabFocus, server, settings, SelectedTab};
 
 // Timeout for key sequences (like Vim's timeoutlen)
 const KEY_SEQUENCE_TIMEOUT_MS: u64 = 1000; // 1 second
@@ -28,7 +28,6 @@ pub struct App {
     pub client_state: client::models::ClientState,
     pub settings_state: settings::models::SettingsState,
 }
-
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum AppState {
@@ -53,10 +52,9 @@ impl Default for InputState {
 impl App {
     pub fn new() -> Self {
         let config = crate::config::Config::load_or_default();
-        
+
         // Load server config
         let server_config = Self::load_server_config(&config.server_config_path);
-        
         Self {
             config,
             server_state: server::models::ServerState::new_with_config(&server_config),
@@ -165,7 +163,6 @@ impl App {
         }
     }
 
-
     fn complete_password_creation(&mut self) {
         // Set the password
         if let Some(ref mut server) = self.server_state.server {
@@ -175,20 +172,20 @@ impl App {
                 self.settings_state.clear_password_creation_input();
                 self.settings_state.password_success = true;
                 self.add_debug("Password set successfully");
-                
+
                 // If server is running, restart it to pick up the new AuthState
                 let was_running = self.server_state.is_server_running();
                 let port = self.server_state.server_port;
-                
+
                 if was_running {
                     self.add_debug("Stopping server to apply password changes");
                     self.server_state.stop_server();
                 }
-                
+
                 // Recreate the server instance to pick up the new config
                 self.add_debug("Recreating server instance with new config");
                 self.server_state.server = Some(cloudhost_server::CloudServer::new());
-                
+
                 // If server was running, restart it automatically
                 if was_running {
                     if let Some(server_port) = port {
@@ -212,7 +209,11 @@ impl App {
         }
     }
 
-    pub fn handle_dynamic_key(&mut self, key: ratatui::crossterm::event::KeyCode, modifiers: ratatui::crossterm::event::KeyModifiers) {
+    pub fn handle_dynamic_key(
+        &mut self,
+        key: ratatui::crossterm::event::KeyCode,
+        modifiers: ratatui::crossterm::event::KeyModifiers,
+    ) {
         use ratatui::crossterm::event::KeyCode;
 
         // Convert key to string for config lookup
@@ -225,7 +226,7 @@ impl App {
                 } else {
                     c.to_string()
                 }
-            },
+            }
             KeyCode::Up => "<Up>".to_string(),
             KeyCode::Down => "<Down>".to_string(),
             KeyCode::Left => "<Left>".to_string(),
@@ -240,7 +241,7 @@ impl App {
                 } else {
                     "<Tab>".to_string()
                 }
-            },
+            }
             _ => return,
         };
 
@@ -264,8 +265,10 @@ impl App {
         if self.settings_state.creating_password {
             if self.settings_state.handle_password_input(key) {
                 // If password creation is complete, handle it
-                if self.settings_state.password_mode == crate::tabs::settings::models::PasswordMode::Confirming 
-                    && self.settings_state.password_input == self.settings_state.password_confirm {
+                if self.settings_state.password_mode
+                    == crate::tabs::settings::models::PasswordMode::Confirming
+                    && self.settings_state.password_input == self.settings_state.password_confirm
+                {
                     self.complete_password_creation();
                 }
                 return;
@@ -274,7 +277,8 @@ impl App {
 
         // Handle leader key sequences first
         if key_str == self.config.leader {
-            self.input_state = InputState::KeySequence("<leader>".to_string(), std::time::Instant::now());
+            self.input_state =
+                InputState::KeySequence("<leader>".to_string(), std::time::Instant::now());
             self.add_debug(&format!("Leader key ('{}') pressed", key_str));
             return;
         }
@@ -327,10 +331,10 @@ impl App {
             .keybindings
             .keys()
             .filter(|k| {
-                k.starts_with(&key_str) && 
-                k.len() > 1 && 
-                // Skip if it's a single special key (starts with <, ends with >, and doesn't contain another <)
-                !(k.starts_with('<') && k.ends_with('>') && !k[1..k.len()-1].contains('<'))
+                k.starts_with(&key_str)
+                    && k.len() > 1
+                    && // Skip if it's a single special key (starts with <, ends with >, and doesn't contain another <)
+                    !(k.starts_with('<') && k.ends_with('>') && !k[1..k.len() - 1].contains('<'))
             })
             .map(|k| k.clone())
             .collect();
@@ -376,20 +380,20 @@ impl App {
             "Create Cloud Folder" => self.server_state.start_creating_cloudfolder(),
             "Delete cloud Folder" => self.server_state.delete_selected_profile(),
             "Create Password" => self.settings_state.start_creating_password(),
-                   "Cycle Focus Forward" => self.cycle_focus_forward(),
-                   "Cycle Focus Backward" => self.cycle_focus_backward(),
-                   "Navigate Up" => {
-                       self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('k'));
-                   },
-                   "Navigate Down" => {
-                       self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('j'));
-                   },
-                   "Navigate to Top" => {
-                       self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('g'));
-                   },
-                   "Navigate to Bottom" => {
-                       self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('G'));
-                   },
+            "Cycle Focus Forward" => self.cycle_focus_forward(),
+            "Cycle Focus Backward" => self.cycle_focus_backward(),
+            "Navigate Up" => {
+                self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('k'));
+            }
+            "Navigate Down" => {
+                self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('j'));
+            }
+            "Navigate to Top" => {
+                self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('g'));
+            }
+            "Navigate to Bottom" => {
+                self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('G'));
+            }
             _ => {
                 self.add_debug(&format!("Unknown action: {}", action));
             }

@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     
     steps:
     - name: Checkout code
@@ -32,12 +33,22 @@ jobs:
     
     - name: Check formatting
       run: cargo fmt -- --check
+      env:
+        CARGO_TERM_COLOR: always
     
     - name: Run clippy
       run: cargo clippy -- -D warnings
+      env:
+        CARGO_TERM_COLOR: always
     
     - name: Run tests
       run: cargo test
+      env:
+        CARGO_TERM_COLOR: always
+        RUST_BACKTRACE: 1
     
     - name: Build
-      run: cargo build
+      run: cargo build --verbose
+      env:
+        CARGO_TERM_COLOR: always
+        RUST_BACKTRACE: 1

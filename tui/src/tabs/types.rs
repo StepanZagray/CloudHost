@@ -66,7 +66,12 @@ impl SelectedTab {
 }
 
 impl SelectedTab {
-    pub fn render_tab(self, app: &crate::models::App, area: Rect, buf: &mut ratatui::buffer::Buffer) {
+    pub fn render_tab(
+        self,
+        app: &crate::models::App,
+        area: Rect,
+        buf: &mut ratatui::buffer::Buffer,
+    ) {
         match self {
             Self::Server => crate::tabs::server::ui::render_server_tab(app, area, buf),
             Self::Client => crate::tabs::client::ui::render_client_tab(app, area, buf),

@@ -8,9 +8,10 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -18,9 +19,6 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: cloudhost-windows
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact_name: cloudhost-macos
     
     steps:
     - name: Checkout code
@@ -44,7 +42,10 @@ jobs:
     
     - name: Build CloudHost (TUI)
       run: |
-        cargo build --release --target ${{ matrix.target }} -p cloudhost
+        cargo build --release --target ${{ matrix.target }} -p cloudhost --verbose
+      env:
+        CARGO_TERM_COLOR: always
+        RUST_BACKTRACE: 1
     
     - name: Create release artifacts
       run: |
@@ -64,6 +65,7 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: startsWith(github.ref, 'refs/tags/')
     
     steps:
@@ -82,7 +84,6 @@ jobs:
         files: |
           artifacts/cloudhost-linux/cloudhost-tui
           artifacts/cloudhost-windows/cloudhost-tui.exe
-          artifacts/cloudhost-macos/cloudhost-tui
         generate_release_notes: true
         draft: false
         prerelease: false
