@@ -47,14 +47,17 @@ jobs:
         CARGO_TERM_COLOR: always
         RUST_BACKTRACE: 1
     
-    - name: Create release artifacts
+    - name: Create release artifacts (Linux)
+      if: matrix.os == 'ubuntu-latest'
       run: |
         mkdir -p release
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          cp target/${{ matrix.target }}/release/cloudhost-tui.exe release/cloudhost-tui.exe
-        else
-          cp target/${{ matrix.target }}/release/cloudhost-tui release/cloudhost-tui
-        fi
+        cp target/${{ matrix.target }}/release/cloudhost-tui release/cloudhost-tui
+    
+    - name: Create release artifacts (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        mkdir release
+        copy target\${{ matrix.target }}\release\cloudhost-tui.exe release\cloudhost-tui.exe
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
