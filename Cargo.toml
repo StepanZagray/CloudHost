@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "tui",
-    "server"
+    "server",
+    "shared"
     # Future UIs you could add:
     # "gui",      # Desktop GUI (GTK/Qt)
     # "web",       # Web UI (React/Vue)

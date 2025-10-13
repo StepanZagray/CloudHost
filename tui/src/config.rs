@@ -56,14 +56,14 @@ impl Default for Config {
         keybindings.insert(
             "<Up>".to_string(),
             Keybinding {
-                action: "Previous Profile".to_string(),
+                action: "Previous Cloudfolder".to_string(),
                 tab: "server".to_string(),
             },
         );
         keybindings.insert(
             "<Down>".to_string(),
             Keybinding {
-                action: "Next Profile".to_string(),
+                action: "Next Cloudfolder".to_string(),
                 tab: "server".to_string(),
             },
         );
@@ -72,6 +72,61 @@ impl Default for Config {
             Keybinding {
                 action: "Create Password".to_string(),
                 tab: "settings".to_string(),
+            },
+        );
+
+        // Vim-style navigation keys
+        keybindings.insert(
+            "k".to_string(),
+            Keybinding {
+                action: "Navigate Up".to_string(),
+                tab: "any".to_string(),
+            },
+        );
+        keybindings.insert(
+            "j".to_string(),
+            Keybinding {
+                action: "Navigate Down".to_string(),
+                tab: "any".to_string(),
+            },
+        );
+        keybindings.insert(
+            "g".to_string(),
+            Keybinding {
+                action: "Navigate to Top".to_string(),
+                tab: "any".to_string(),
+            },
+        );
+        keybindings.insert(
+            "G".to_string(),
+            Keybinding {
+                action: "Navigate to Bottom".to_string(),
+                tab: "any".to_string(),
+            },
+        );
+
+        // Focus management
+        keybindings.insert(
+            "<Tab>".to_string(),
+            Keybinding {
+                action: "Cycle Focus Forward".to_string(),
+                tab: "any".to_string(),
+            },
+        );
+        keybindings.insert(
+            "<S-Tab>".to_string(),
+            Keybinding {
+                action: "Cycle Focus Backward".to_string(),
+                tab: "any".to_string(),
+            },
+        );
+
+        // Debug toggle
+        keybindings.insert(
+            "<leader>d".to_string(),
+            Keybinding {
+                action: "Toggle Debug".to_string(),
+                tab: "any".to_string(),
             },
         );
 
@@ -115,11 +170,8 @@ impl Config {
     }
 
     pub fn load_or_default() -> Self {
-        Self::load().unwrap_or_else(|e| {
-            eprintln!(
-                "Warning: Could not load config.toml ({}), using default keybindings",
-                e
-            );
+        Self::load().unwrap_or_else(|_e| {
+            // TUI will handle its own config logging
             Self::default()
         })
     }

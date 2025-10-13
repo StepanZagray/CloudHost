@@ -1,6 +1,7 @@
 use crate::tabs::focus::TabFocus;
 use cloudhost_server::{CloudFolder as ServerCloudFolder, CloudServer, ServerConfig};
 use ratatui::crossterm::event::KeyCode;
+use ratatui::widgets::{ListState, ScrollbarState};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -28,6 +29,8 @@ pub struct ServerState {
     pub focused_panel: FocusedPanel, // Which panel is currently focused
     pub server: Option<CloudServer>,
     pub server_port: Option<u16>,
+    pub server_logs_list_state: ListState, // For scrollable server logs
+    pub server_logs_scroll_state: ScrollbarState, // For scrollbar
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +61,8 @@ impl Default for ServerState {
             focused_panel: FocusedPanel::CloudFolders,
             server: None,
             server_port: None,
+            server_logs_list_state: ListState::default(),
+            server_logs_scroll_state: ScrollbarState::default(),
         }
     }
 }
@@ -92,18 +97,19 @@ impl ServerState {
         let folder_path = self.new_cloudfolder_path.trim();
 
         if name.is_empty() {
-            self.cloudfolder_creation_error = Some("Profile name cannot be empty".to_string());
+            self.cloudfolder_creation_error = Some("Cloudfolder name cannot be empty".to_string());
             return;
         }
 
         if folder_path.is_empty() {
-            self.cloudfolder_creation_error = Some("Profile path cannot be empty".to_string());
+            self.cloudfolder_creation_error = Some("Cloudfolder path cannot be empty".to_string());
             return;
         }
 
-        // Check if profile already exists
-        if self.profile_exists(name) {
-            self.cloudfolder_creation_error = Some(format!("Profile '{}' already exists", name));
+        // Check if cloudfolder already exists
+        if self.cloudfolder_exists(name) {
+            self.cloudfolder_creation_error =
+                Some(format!("Cloudfolder '{}' already exists", name));
             return;
         }
 
@@ -145,14 +151,12 @@ impl ServerState {
     pub fn start_server(&mut self) {
         // Check if server instance exists
         if self.server.is_none() {
-            self.add_server_log("❌ Server instance not available - creating new instance");
             self.server = Some(CloudServer::new());
         }
 
         // Check if server is already running
         if let Some(ref server) = self.server {
             if server.is_running() {
-                self.add_server_log("⚠️ Server is already running");
                 return;
             }
         }
@@ -160,27 +164,17 @@ impl ServerState {
         // Check if password is set
         if let Some(ref server) = self.server {
             if !server.has_password() {
-                self.add_server_log("❌ Cannot start server: No password set");
-                self.add_server_log("💡 Go to Settings tab and press 'p' to create a password");
                 return;
             }
         }
 
         // Verify all cloudfolders have valid paths
-        for profile in &self.cloudfolders {
-            if !profile.folder_path.exists() {
-                self.add_server_log(&format!(
-                    "❌ Profile folder does not exist: {}",
-                    profile.folder_path.display()
-                ));
+        for cloudfolder in &self.cloudfolders {
+            if !cloudfolder.folder_path.exists() {
                 return;
             }
 
-            if !profile.folder_path.is_dir() {
-                self.add_server_log(&format!(
-                    "❌ Profile path is not a directory: {}",
-                    profile.folder_path.display()
-                ));
+            if !cloudfolder.folder_path.is_dir() {
                 return;
             }
         }
@@ -198,56 +192,21 @@ impl ServerState {
             }
 
             match server.start_server(port) {
-                Ok(_) => {
-                    self.server_port = Some(port);
+                Ok(_) => (),
 
-                    self.add_server_log("🚀 Starting CloudTUI server");
-                    self.add_server_log(&format!("🌐 Server started on http://127.0.0.1:{}", port));
-                    self.add_server_log(&format!(
-                        "📊 Serving {} cloudfolders",
-                        self.cloudfolders.len()
-                    ));
-
-                    let log_messages: Vec<String> = self
-                        .cloudfolders
-                        .iter()
-                        .map(|cloudfolder| {
-                            format!(
-                                "📁 Cloud Folder '{}': http://127.0.0.1:{}/{}",
-                                cloudfolder.name, port, cloudfolder.name
-                            )
-                        })
-                        .collect();
-
-                    for message in log_messages {
-                        self.add_server_log(&message);
-                    }
-
-                    self.add_server_log(&format!(
-                        "🔗 Server status: http://127.0.0.1:{}/api/status",
-                        port
-                    ));
-                }
                 Err(e) => {
-                    self.add_server_log(&format!("❌ Failed to start server: {}", e));
+                    // Server will handle its own error logging
+                    eprintln!("Failed to start server: {}", e);
                 }
             }
         }
     }
 
-    pub fn stop_server(&mut self) {
+    pub async fn stop_server(&mut self) {
         if let Some(ref mut server) = self.server {
-            let port = self.server_port.take();
-            server.stop_server();
-
-            if let Some(port) = port {
-                self.add_server_log(&format!("🛑 Stopped server on port {}", port));
-            } else {
-                self.add_server_log("🛑 Stopped server");
-            }
-            self.add_server_log("📴 All connections closed");
-        } else {
-            self.add_server_log("⚠️ No server running");
+            let _port = self.server_port.take();
+            server.stop_server().await;
+            // Server will handle its own logging
         }
     }
 
@@ -284,7 +243,7 @@ impl ServerState {
 
     pub fn get_cloudfolders_toml_path() -> PathBuf {
         let mut path = dirs::data_dir().unwrap_or_else(|| {
-            eprintln!("Warning: Could not determine data directory, using current directory");
+            // Server will handle its own logging
             PathBuf::from(".")
         });
         path.push("CloudTUI");
@@ -377,15 +336,15 @@ impl ServerState {
         path.to_string()
     }
 
-    pub fn profile_exists(&self, name: &str) -> bool {
+    pub fn cloudfolder_exists(&self, name: &str) -> bool {
         self.cloudfolders.iter().any(|p| p.name == name)
     }
 
-    pub fn delete_selected_profile(&mut self) {
+    pub fn delete_selected_cloudfolder(&mut self) {
         if !self.cloudfolders.is_empty()
             && self.selected_cloudfolder_index < self.cloudfolders.len()
         {
-            let _profile_name = self.cloudfolders[self.selected_cloudfolder_index]
+            let _cloudfolder_name = self.cloudfolders[self.selected_cloudfolder_index]
                 .name
                 .clone();
 
@@ -402,13 +361,13 @@ impl ServerState {
         }
     }
 
-    pub fn navigate_profile_up(&mut self) {
+    pub fn navigate_cloudfolder_up(&mut self) {
         if self.selected_cloudfolder_index > 0 {
             self.selected_cloudfolder_index -= 1;
         }
     }
 
-    pub fn navigate_profile_down(&mut self) {
+    pub fn navigate_cloudfolder_down(&mut self) {
         if self.selected_cloudfolder_index < self.cloudfolders.len().saturating_sub(1) {
             self.selected_cloudfolder_index += 1;
         }
@@ -423,31 +382,59 @@ impl ServerState {
     }
 
     pub fn scroll_logs_up(&mut self) {
-        if self.log_scroll_offset > 0 {
-            self.log_scroll_offset -= 1;
+        if let Some(selected) = self.server_logs_list_state.selected() {
+            if selected > 0 {
+                let new_selected = selected - 1;
+                self.server_logs_list_state.select(Some(new_selected));
+                self.update_scrollbar_state();
+            }
         }
     }
 
     pub fn scroll_logs_down(&mut self) {
-        // Don't scroll past the point where newest logs are at the bottom
-        // This will be limited by the UI based on available height
-        self.log_scroll_offset += 1;
+        if let Some(selected) = self.server_logs_list_state.selected() {
+            if selected < self.server_logs.len().saturating_sub(1) {
+                let new_selected = selected + 1;
+                self.server_logs_list_state.select(Some(new_selected));
+                self.update_scrollbar_state();
+            }
+        } else if !self.server_logs.is_empty() {
+            self.server_logs_list_state.select(Some(0));
+            self.update_scrollbar_state();
+        }
     }
 
     pub fn scroll_logs_to_bottom(&mut self) {
-        self.log_scroll_offset = 0; // Show newest logs at bottom
+        if !self.server_logs.is_empty() {
+            let last_index = self.server_logs.len().saturating_sub(1);
+            self.server_logs_list_state.select(Some(last_index));
+            self.update_scrollbar_state();
+        }
+    }
+
+    fn update_scrollbar_state(&mut self) {
+        if let Some(selected) = self.server_logs_list_state.selected() {
+            self.server_logs_scroll_state = self
+                .server_logs_scroll_state
+                .content_length(self.server_logs.len())
+                .position(selected);
+        }
     }
 
     /// Check if the user is currently viewing the bottom (newest logs)
     pub fn is_at_bottom(&self) -> bool {
-        self.log_scroll_offset == 0
+        if let Some(selected) = self.server_logs_list_state.selected() {
+            selected == self.server_logs.len().saturating_sub(1)
+        } else {
+            true
+        }
     }
 }
 
 impl TabFocus for ServerState {
     fn get_focused_element(&self) -> String {
         match self.focused_panel {
-            FocusedPanel::CloudFolders => "Profiles".to_string(),
+            FocusedPanel::CloudFolders => "Cloudfolders".to_string(),
             FocusedPanel::ServerInfo => "ServerInfo".to_string(),
             FocusedPanel::ServerLogs => "ServerLogs".to_string(),
         }
@@ -473,40 +460,56 @@ impl TabFocus for ServerState {
         match key {
             KeyCode::Char('j') => {
                 match self.focused_panel {
-                    FocusedPanel::CloudFolders => self.navigate_profile_down(),
-                    FocusedPanel::ServerInfo => self.cycle_focus_forward(),
-                    FocusedPanel::ServerLogs => self.scroll_logs_down(),
+                    FocusedPanel::CloudFolders => {
+                        self.navigate_cloudfolder_down();
+                        true
+                    }
+                    FocusedPanel::ServerInfo => false, // No navigation in ServerInfo panel
+                    FocusedPanel::ServerLogs => {
+                        self.scroll_logs_down();
+                        true
+                    }
                 }
-                true
             }
             KeyCode::Char('k') => {
                 match self.focused_panel {
-                    FocusedPanel::CloudFolders => self.navigate_profile_up(),
-                    FocusedPanel::ServerInfo => self.cycle_focus_forward(),
-                    FocusedPanel::ServerLogs => self.scroll_logs_up(),
+                    FocusedPanel::CloudFolders => {
+                        self.navigate_cloudfolder_up();
+                        true
+                    }
+                    FocusedPanel::ServerInfo => false, // No navigation in ServerInfo panel
+                    FocusedPanel::ServerLogs => {
+                        self.scroll_logs_up();
+                        true
+                    }
                 }
-                true
             }
             KeyCode::Char('g') => {
                 // Handle gg sequence (go to top)
                 match self.focused_panel {
                     FocusedPanel::CloudFolders => {
                         self.selected_cloudfolder_index = 0;
+                        true
                     }
-                    FocusedPanel::ServerInfo => self.cycle_focus_forward(),
-                    FocusedPanel::ServerLogs => self.scroll_logs_to_top(),
+                    FocusedPanel::ServerInfo => false, // No navigation in ServerInfo panel
+                    FocusedPanel::ServerLogs => {
+                        self.scroll_logs_to_top();
+                        true
+                    }
                 }
-                true
             }
             KeyCode::Char('G') => {
                 match self.focused_panel {
                     FocusedPanel::CloudFolders => {
                         self.selected_cloudfolder_index = self.cloudfolders.len().saturating_sub(1);
+                        true
                     }
-                    FocusedPanel::ServerInfo => self.cycle_focus_forward(),
-                    FocusedPanel::ServerLogs => self.scroll_logs_to_bottom(),
+                    FocusedPanel::ServerInfo => false, // No navigation in ServerInfo panel
+                    FocusedPanel::ServerLogs => {
+                        self.scroll_logs_to_bottom();
+                        true
+                    }
                 }
-                true
             }
             _ => false,
         }
@@ -517,16 +520,19 @@ impl TabFocus for ServerState {
     }
 
     fn focusable_elements_count(&self) -> usize {
-        3 // Profiles, ServerInfo, ServerLogs
+        3 // Cloudfolders, ServerInfo, ServerLogs
     }
 }
 
 impl ServerState {
     pub fn scroll_logs_to_top(&mut self) {
-        self.log_scroll_offset = self.server_logs.len().saturating_sub(1); // Show oldest logs at top
+        if !self.server_logs.is_empty() {
+            self.server_logs_list_state.select(Some(0));
+            self.update_scrollbar_state();
+        }
     }
 
-    pub fn handle_profile_input(&mut self, key: ratatui::crossterm::event::KeyCode) {
+    pub fn handle_cloudfolder_input(&mut self, key: ratatui::crossterm::event::KeyCode) {
         use ratatui::crossterm::event::KeyCode;
 
         match key {
@@ -537,7 +543,7 @@ impl ServerState {
                         self.cloudfolder_input_field = CloudFolderInputField::Path;
                     }
                 } else {
-                    // Try to create profile when in path field
+                    // Try to create cloudfolder when in path field
                     self.create_cloudfolder(&crate::config::Config::load_or_default());
                 }
             }
@@ -574,6 +580,43 @@ impl ServerState {
                 self.cloudfolder_creation_error = None; // Clear error when editing
             }
             _ => {}
+        }
+    }
+
+    /// Cycle focus forward through available panels
+    pub fn cycle_focus_forward(&mut self) {
+        self.focused_panel = match self.focused_panel {
+            FocusedPanel::CloudFolders => FocusedPanel::ServerInfo,
+            FocusedPanel::ServerInfo => FocusedPanel::ServerLogs,
+            FocusedPanel::ServerLogs => FocusedPanel::CloudFolders,
+        };
+    }
+
+    /// Cycle focus backward through available panels
+    pub fn cycle_focus_backward(&mut self) {
+        self.focused_panel = match self.focused_panel {
+            FocusedPanel::CloudFolders => FocusedPanel::ServerLogs,
+            FocusedPanel::ServerInfo => FocusedPanel::CloudFolders,
+            FocusedPanel::ServerLogs => FocusedPanel::ServerInfo,
+        };
+    }
+
+    /// Navigate to previous cloudfolder
+    pub fn previous_cloudfolder(&mut self) {
+        if !self.cloudfolders.is_empty() {
+            self.selected_cloudfolder_index = if self.selected_cloudfolder_index == 0 {
+                self.cloudfolders.len() - 1
+            } else {
+                self.selected_cloudfolder_index - 1
+            };
+        }
+    }
+
+    /// Navigate to next cloudfolder
+    pub fn next_cloudfolder(&mut self) {
+        if !self.cloudfolders.is_empty() {
+            self.selected_cloudfolder_index =
+                (self.selected_cloudfolder_index + 1) % self.cloudfolders.len();
         }
     }
 }

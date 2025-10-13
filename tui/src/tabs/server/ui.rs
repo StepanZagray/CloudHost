@@ -2,49 +2,44 @@ use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    widgets::{Block, List, ListItem, ListState, Paragraph, Widget},
+    widgets::{
+        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        StatefulWidget, Widget,
+    },
 };
 
 use crate::models::App;
 use crate::tabs::server::models::FocusedPanel;
 
-pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
+pub fn render_server_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
     // Ensure we have enough space for borders
     if area.height < 8 || area.width < 20 {
         return;
     }
 
-    // Create horizontal split: left (cloudfolders) and right (server info + logs)
-    let horizontal_chunks = Layout::default()
+    // Create 3-column layout: cloudfolders (15%), server info (35%), server logs (50%)
+    let three_column_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length((area.width * 40 / 100).max(20)), // Left: cloudfolders (40% or min 20 chars)
-            Constraint::Min(30), // Right: server info + logs (remaining space)
+            Constraint::Length((area.width * 15 / 100).max(15)), // Left: cloudfolders (15% or min 15 chars)
+            Constraint::Length((area.width * 35 / 100).max(30)), // Middle: server info (35% or min 30 chars)
+            Constraint::Min(30), // Right: server logs (50% - remaining space)
         ])
         .split(area);
 
-    // Split the right side vertically: server info (top) and logs (bottom)
-    let right_vertical_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(10), // Server info - fixed height
-            Constraint::Min(5),     // Server logs - remaining space
-        ])
-        .split(horizontal_chunks[1]);
-
-    // Left side: Profile list
-    let profile_items: Vec<ListItem> = app
+    // Left side: Cloudfolder list
+    let cloudfolder_items: Vec<ListItem> = app
         .server_state
         .cloudfolders
         .iter()
         .enumerate()
-        .map(|(i, profile)| {
+        .map(|(i, cloudfolder)| {
             let style = if i == app.server_state.selected_cloudfolder_index {
                 Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
             };
-            ListItem::new(profile.name.as_str()).style(style)
+            ListItem::new(cloudfolder.name.as_str()).style(style)
         })
         .collect();
 
@@ -52,17 +47,17 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
     list_state.select(Some(app.server_state.selected_cloudfolder_index));
 
     // Add focus indicator to title
-    let profile_title = if app.server_state.focused_panel == FocusedPanel::CloudFolders {
+    let cloudfolder_title = if app.server_state.focused_panel == FocusedPanel::CloudFolders {
         "Cloud folders (FOCUSED)"
     } else {
         "Cloud folders"
     };
 
-    let profile_list = List::new(profile_items)
+    let cloudfolder_list = List::new(cloudfolder_items)
         .block(
             Block::default()
                 .borders(ratatui::widgets::Borders::ALL)
-                .title(profile_title)
+                .title(cloudfolder_title)
                 .title_alignment(Alignment::Left)
                 .border_style(
                     if app.server_state.focused_panel == FocusedPanel::CloudFolders {
@@ -76,7 +71,7 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
         )
         .highlight_style(Style::default().fg(Color::Yellow));
 
-    profile_list.render(horizontal_chunks[0], buf);
+    Widget::render(cloudfolder_list, three_column_chunks[0], buf);
 
     // Right side: Server controls and info
     let server_status = if app.server_state.is_server_running() {
@@ -89,14 +84,14 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
         "🔴 Not Running".to_string()
     };
 
-    let server_info = if let Some(profile) = app
+    let server_info = if let Some(cloudfolder) = app
         .server_state
         .cloudfolders
         .get(app.server_state.selected_cloudfolder_index)
     {
-        let profile_url = if app.server_state.is_server_running() {
+        let cloudfolder_url = if app.server_state.is_server_running() {
             if let Some(port) = app.server_state.get_server_port() {
-                format!("http://127.0.0.1:{}/{}", port, profile.name)
+                format!("http://127.0.0.1:{}/{}", port, cloudfolder.name)
             } else {
                 "Server running".to_string()
             }
@@ -105,10 +100,10 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
         };
 
         format!(
-            "Selected Profile: {}\nPath: {}\nURL: {}\nTo add files to this profile, add them to the profile folder manually\nStatus: {}",
-            profile.name,
-            profile.folder_path.display(),
-            profile_url,
+            "Selected Cloudfolder: {}\nPath: {}\nURL: {}\nTo add files to this cloudfolder,\nadd them to the cloudfolder folder manually\nStatus: {}",
+            cloudfolder.name,
+            cloudfolder.folder_path.display(),
+            cloudfolder_url,
             server_status,
         )
     } else {
@@ -140,32 +135,36 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
         )
         .alignment(ratatui::layout::Alignment::Left);
 
-    server_block.render(right_vertical_chunks[0], buf);
+    server_block.render(three_column_chunks[1], buf);
 
     // Server logs section with scrolling
-    let logs = &app.server_state.server_logs;
-    let scroll_offset = app.server_state.log_scroll_offset;
+    let logs = &app.server_logs; // Use the main app's server logs instead of server_state
 
     // Ensure the logs area has enough space
-    if right_vertical_chunks[1].height < 3 {
+    if three_column_chunks[2].height < 3 {
         return;
     }
 
-    // Calculate how many logs can fit in the available height
-    let available_height = right_vertical_chunks[1].height.saturating_sub(2); // Subtract border height
-    let max_scroll_offset = if logs.len() > available_height as usize {
-        logs.len() - available_height as usize
-    } else {
-        0
-    };
-
-    // Limit scroll offset to prevent scrolling past the newest logs
-    let effective_scroll_offset = scroll_offset.min(max_scroll_offset);
-
     let visible_logs: Vec<ListItem> = logs
         .iter()
-        .skip(effective_scroll_offset) // Skip older logs at the top
-        .map(|log| ListItem::new(log.as_str()))
+        .map(|log| {
+            let level_color = match log.level {
+                cloudhost_shared::debug_stream::LogLevel::Error => Color::Red,
+                cloudhost_shared::debug_stream::LogLevel::Warning => Color::Yellow,
+                cloudhost_shared::debug_stream::LogLevel::Info => Color::Green,
+                cloudhost_shared::debug_stream::LogLevel::Debug => Color::Blue,
+            };
+
+            let formatted_msg = format!(
+                "[{}] [{}] {}: {}",
+                log.timestamp.format("%H:%M:%S%.3f"),
+                log.level,
+                log.source,
+                log.message
+            );
+
+            ListItem::new(formatted_msg).style(Style::default().fg(level_color))
+        })
         .collect();
 
     // Add focus indicator to title
@@ -175,7 +174,7 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
         "Server Logs"
     };
 
-    let server_logs = List::new(visible_logs)
+    let server_logs = List::new(visible_logs.clone())
         .block(
             Block::default()
                 .borders(ratatui::widgets::Borders::ALL)
@@ -191,17 +190,50 @@ pub fn render_server_tab(app: &App, area: Rect, buf: &mut Buffer) {
                     },
                 ),
         )
-        .style(Style::default().fg(Color::Green));
+        .style(Style::default().fg(Color::Green))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        )
+        .highlight_symbol(">> ");
 
-    server_logs.render(right_vertical_chunks[1], buf);
+    // Use the persistent ListState from ServerState
+    let mut list_state = app.server_state.server_logs_list_state.clone();
+    if !visible_logs.is_empty() && list_state.selected().is_none() {
+        // Select the last item (newest log) by default if nothing is selected
+        let selected_index = visible_logs.len().saturating_sub(1);
+        list_state.select(Some(selected_index));
+    }
 
-    // Show popup if creating profile
+    // Render the list with state
+    StatefulWidget::render(server_logs, three_column_chunks[2], buf, &mut list_state);
+
+    // Update the persistent state
+    app.server_state.server_logs_list_state = list_state;
+
+    // Render scrollbar
+    let mut scroll_state = app.server_state.server_logs_scroll_state.clone();
+    scroll_state = scroll_state.content_length(visible_logs.len());
+    if let Some(selected) = app.server_state.server_logs_list_state.selected() {
+        scroll_state = scroll_state.position(selected);
+    }
+
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(Some("↑"))
+        .end_symbol(Some("↓"));
+    scrollbar.render(three_column_chunks[2], buf, &mut scroll_state);
+
+    // Update the persistent scroll state
+    app.server_state.server_logs_scroll_state = scroll_state;
+
+    // Show popup if creating cloudfolder
     if app.server_state.creating_cloudfolder {
-        render_profile_creation_popup(app, area, buf);
+        render_cloudfolder_creation_popup(app, area, buf);
     }
 }
 
-pub fn render_profile_creation_popup(app: &App, area: Rect, buf: &mut Buffer) {
+pub fn render_cloudfolder_creation_popup(app: &App, area: Rect, buf: &mut Buffer) {
     use ratatui::layout::{Alignment, Constraint, Layout};
     use ratatui::style::{Color, Style};
     use ratatui::widgets::{Block, Borders, Clear, Paragraph};
@@ -247,12 +279,12 @@ pub fn render_profile_creation_popup(app: &App, area: Rect, buf: &mut Buffer) {
 
     let popup_content = if let Some(error) = &app.server_state.cloudfolder_creation_error {
         format!(
-            "Create New Profile\n\n{}\n{}\n\nError: {}",
+            "Create New Cloudfolder\n\n{}\n{}\n\nError: {}",
             name_field, path_field, error
         )
     } else {
         format!(
-            "Create New Profile\n\n{}\n{}\n\nPress Tab to switch fields, Enter to confirm, Esc to cancel",
+            "Create New Cloudfolder\n\n{}\n{}\n\nPress Tab to switch fields, Enter to confirm, Esc to cancel",
             name_field, path_field
         )
     };
@@ -261,7 +293,7 @@ pub fn render_profile_creation_popup(app: &App, area: Rect, buf: &mut Buffer) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("New Profile")
+                .title("New Cloudfolder")
                 .title_alignment(Alignment::Center)
                 .border_style(Style::default().fg(Color::Yellow)),
         )

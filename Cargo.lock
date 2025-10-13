@@ -317,6 +317,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "cloudhost-server",
+ "cloudhost-shared",
  "color-eyre",
  "crossterm 0.29.0",
  "dirs",
@@ -341,6 +342,7 @@ dependencies = [
  "axum",
  "bcrypt",
  "chrono",
+ "cloudhost-shared",
  "dirs",
  "jsonwebtoken",
  "mime_guess",
@@ -353,6 +355,15 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "cloudhost-shared"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "tokio",
 ]
 
 [[package]]

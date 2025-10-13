@@ -14,7 +14,9 @@ server_config_path = "~/.cloudtui/server.toml"
 # Server tab keybindings
 "s" = { action = "Start/Stop Server", tab = "server" }
 "n" = { action = "Create Cloud Folder", tab = "server" }
-"d" = { action = "Delete Cloud Folder", tab = "server" }
+"d" = { action = "Delete cloud Folder", tab = "server" }
+"<Up>" = { action = "Previous Cloudfolder", tab = "server" }
+"<Down>" = { action = "Next Cloudfolder", tab = "server" }
 
 # Settings tab keybindings
 "p" = { action = "Create Password", tab = "settings" }
@@ -26,9 +28,5 @@ server_config_path = "~/.cloudtui/server.toml"
 # Vim-style navigation within focused widgets (works in all tabs)
 "k" = { action = "Navigate Up", tab = "any" }
 "j" = { action = "Navigate Down", tab = "any" }
-"gg" = { action = "Navigate to Top", tab = "any" }
+"g" = { action = "Navigate to Top", tab = "any" }
 "G" = { action = "Navigate to Bottom", tab = "any" }
-
-# Cloud Folder creation keybindings (when creating cloud folder)
-"<Enter>" = { action = "Confirm Cloud Folder", tab = "server" }
-"<Esc>" = { action = "Cancel Cloud Folder", tab = "server" }

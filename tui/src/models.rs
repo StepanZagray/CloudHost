@@ -8,6 +8,7 @@ use ratatui::{
 use strum::IntoEnumIterator;
 
 use crate::tabs::{client, focus::TabFocus, server, settings, SelectedTab};
+use cloudhost_shared::debug_stream::{get_debug_stream, DebugMessage};
 
 // Timeout for key sequences (like Vim's timeoutlen)
 const KEY_SEQUENCE_TIMEOUT_MS: u64 = 1000; // 1 second
@@ -21,6 +22,9 @@ pub struct App {
     pub pending_number: Option<usize>,
     pub debug_mode: bool,
     pub debug_info: Vec<String>,
+    pub server_logs: Vec<DebugMessage>,
+    pub debug_receiver:
+        Option<std::sync::Arc<std::sync::Mutex<Vec<cloudhost_shared::debug_stream::DebugMessage>>>>,
 
     // Tab states
     pub server_state: server::models::ServerState,
@@ -49,11 +53,15 @@ impl App {
 
         // Load server config
         let server_config = Self::load_server_config(&config.server_config_path);
+
+        // Create default server config file if it doesn't exist
+        Self::ensure_server_config_file(&config.server_config_path);
         Self {
             config,
             server_state: server::models::ServerState::new_with_config(&server_config),
             client_state: client::models::ClientState::default(),
             settings_state: settings::models::SettingsState::default(),
+            debug_receiver: None,
             ..Default::default()
         }
     }
@@ -72,14 +80,39 @@ impl App {
         match std::fs::read_to_string(&expanded_path) {
             Ok(content) => match toml::from_str::<cloudhost_server::ServerConfig>(&content) {
                 Ok(server_config) => server_config,
-                Err(e) => {
-                    eprintln!("Warning: Failed to parse server config: {}", e);
+                Err(_e) => {
+                    // Server will handle its own logging - just use default config
                     cloudhost_server::ServerConfig::default()
                 }
             },
-            Err(e) => {
-                eprintln!("Warning: Could not read server config file: {}", e);
+            Err(_e) => {
+                // Server will handle its own logging - just use default config
                 cloudhost_server::ServerConfig::default()
+            }
+        }
+    }
+
+    fn ensure_server_config_file(server_config_path: &str) {
+        let expanded_path = if let Some(stripped) = server_config_path.strip_prefix("~/") {
+            if let Some(home) = dirs::home_dir() {
+                home.join(stripped)
+            } else {
+                std::path::PathBuf::from(server_config_path)
+            }
+        } else {
+            std::path::PathBuf::from(server_config_path)
+        };
+
+        // Create the directory if it doesn't exist
+        if let Some(parent) = expanded_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        // Create default config file if it doesn't exist
+        if !expanded_path.exists() {
+            let default_config = cloudhost_server::ServerConfig::default();
+            if let Ok(config_str) = toml::to_string_pretty(&default_config) {
+                let _ = std::fs::write(&expanded_path, config_str);
             }
         }
     }
@@ -137,6 +170,58 @@ impl App {
         }
     }
 
+    pub async fn start_debug_stream_subscription(&mut self) {
+        if let Some(debug_stream) = get_debug_stream() {
+            let mut receiver = debug_stream.subscribe();
+
+            // Get initial messages from history
+            let initial_messages = debug_stream.get_recent(50).await;
+            self.server_logs = initial_messages;
+
+            // Spawn a task to listen for new debug messages
+            let server_logs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let server_logs_clone = server_logs.clone();
+
+            tokio::spawn(async move {
+                while let Ok(message) = receiver.recv().await {
+                    if let Ok(mut logs) = server_logs_clone.lock() {
+                        logs.push(message);
+                        // Keep only last 100 messages
+                        if logs.len() > 100 {
+                            let excess = logs.len() - 100;
+                            logs.drain(0..excess);
+                        }
+                    }
+                }
+            });
+
+            // Store the receiver for later use
+            self.debug_receiver = Some(server_logs);
+        }
+    }
+
+    pub async fn update_server_logs(&mut self) {
+        if let Some(server_logs) = &self.debug_receiver {
+            if let Ok(logs) = server_logs.lock() {
+                self.server_logs = logs.clone();
+
+                // Also update the server state's logs for display
+                self.server_state.server_logs = logs
+                    .iter()
+                    .map(|msg| {
+                        format!(
+                            "[{}] [{}] {}: {}",
+                            msg.timestamp.format("%H:%M:%S"),
+                            msg.level,
+                            msg.source,
+                            msg.message
+                        )
+                    })
+                    .collect();
+            }
+        }
+    }
+
     // Tab-specific focus management
     pub fn cycle_focus_forward(&mut self) {
         match self.selected_tab {
@@ -162,7 +247,7 @@ impl App {
         }
     }
 
-    fn complete_password_creation(&mut self) {
+    async fn complete_password_creation(&mut self) {
         // Set the password
         if let Some(ref mut server) = self.server_state.server {
             if let Err(e) = server.set_password(&self.settings_state.password_input) {
@@ -178,7 +263,7 @@ impl App {
 
                 if was_running {
                     self.add_debug("Stopping server to apply password changes");
-                    self.server_state.stop_server();
+                    self.server_state.stop_server().await;
                 }
 
                 // Recreate the server instance to pick up the new config
@@ -208,7 +293,7 @@ impl App {
         }
     }
 
-    pub fn handle_dynamic_key(
+    pub async fn handle_dynamic_key(
         &mut self,
         key: ratatui::crossterm::event::KeyCode,
         modifiers: ratatui::crossterm::event::KeyModifiers,
@@ -254,9 +339,9 @@ impl App {
         self.add_debug(&format!("Key: {} -> tab: {}", key_str, current_tab));
         self.add_debug(&format!("Input state: {:?}", self.input_state));
 
-        // Handle special cases first (profile creation)
+        // Handle special cases first (cloudfolder creation)
         if self.server_state.creating_cloudfolder {
-            self.server_state.handle_profile_input(key);
+            self.server_state.handle_cloudfolder_input(key);
             return;
         }
 
@@ -267,7 +352,7 @@ impl App {
                 == crate::tabs::settings::models::PasswordMode::Confirming
                 && self.settings_state.password_input == self.settings_state.password_confirm
             {
-                self.complete_password_creation();
+                self.complete_password_creation().await;
             }
             return;
         }
@@ -288,7 +373,7 @@ impl App {
                 if let Some(keybinding) = self.config.get_keybinding(seq) {
                     if self.config.is_key_valid_for_tab(seq, current_tab) {
                         let action = keybinding.action.clone();
-                        self.execute_action(&action);
+                        self.execute_action(&action).await;
                     }
                 }
                 self.input_state = InputState::Normal;
@@ -300,7 +385,7 @@ impl App {
                 if let Some(keybinding) = self.config.get_keybinding(&leader_key) {
                     if self.config.is_key_valid_for_tab(&leader_key, current_tab) {
                         let action = keybinding.action.clone();
-                        self.execute_action(&action);
+                        self.execute_action(&action).await;
                     }
                 }
                 self.input_state = InputState::Normal;
@@ -311,7 +396,7 @@ impl App {
                 if let Some(keybinding) = self.config.get_keybinding(&complete_key) {
                     if self.config.is_key_valid_for_tab(&complete_key, current_tab) {
                         let action = keybinding.action.clone();
-                        self.execute_action(&action);
+                        self.execute_action(&action).await;
                     }
                 }
                 self.input_state = InputState::Normal;
@@ -349,7 +434,7 @@ impl App {
         if let Some(keybinding) = self.config.get_keybinding(&key_str) {
             if self.config.is_key_valid_for_tab(&key_str, current_tab) {
                 let action = keybinding.action.clone();
-                self.execute_action(&action);
+                self.execute_action(&action).await;
             } else {
                 self.add_debug(&format!(
                     "Key '{}' not valid for tab '{}'",
@@ -361,7 +446,7 @@ impl App {
         }
     }
 
-    fn execute_action(&mut self, action: &str) {
+    async fn execute_action(&mut self, action: &str) {
         match action {
             "Quit" => self.quit(),
             "Next Tab" => self.next_tab(),
@@ -369,13 +454,13 @@ impl App {
             "Toggle Debug" => self.toggle_debug(),
             "Start/Stop Server" => {
                 if self.server_state.is_server_running() {
-                    self.server_state.stop_server();
+                    self.server_state.stop_server().await;
                 } else {
                     self.server_state.start_server();
                 }
             }
             "Create Cloud Folder" => self.server_state.start_creating_cloudfolder(),
-            "Delete cloud Folder" => self.server_state.delete_selected_profile(),
+            "Delete cloud Folder" => self.server_state.delete_selected_cloudfolder(),
             "Create Password" => self.settings_state.start_creating_password(),
             "Cycle Focus Forward" => self.cycle_focus_forward(),
             "Cycle Focus Backward" => self.cycle_focus_backward(),
@@ -398,7 +483,7 @@ impl App {
     }
 
     /// Check if any pending key sequences have timed out and execute them
-    pub fn check_timeouts(&mut self) {
+    pub async fn check_timeouts(&mut self) {
         if let InputState::KeySequence(ref seq, start_time) = self.input_state {
             if start_time.elapsed().as_millis() > KEY_SEQUENCE_TIMEOUT_MS as u128 {
                 // Timeout reached, execute the single key if it exists
@@ -410,7 +495,7 @@ impl App {
                     };
                     if self.config.is_key_valid_for_tab(seq, current_tab) {
                         let action = keybinding.action.clone();
-                        self.execute_action(&action);
+                        self.execute_action(&action).await;
                     }
                 }
                 self.input_state = InputState::Normal;
@@ -419,7 +504,7 @@ impl App {
     }
 }
 
-impl Widget for &App {
+impl Widget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer) {
         use ratatui::layout::{Constraint, Layout};
 
@@ -479,24 +564,47 @@ impl App {
 
     pub fn render_debug_panel(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::style::{Color, Style};
-        use ratatui::widgets::{Block, Borders, List, ListItem};
+        use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 
-        let debug_items: Vec<ListItem> = self
-            .debug_info
-            .iter()
-            .map(|info| ListItem::new(info.as_str()))
-            .collect();
+        // Create a scrollable area for server logs
+        let server_logs_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: area.height.saturating_sub(3), // Leave space for header
+        };
 
-        let debug_list = List::new(debug_items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Debug Log (<leader>d to toggle)")
-                    .border_style(Style::default().fg(Color::Yellow)),
-            )
-            .style(Style::default().fg(Color::White));
+        let header_area = Rect {
+            x: area.x,
+            y: area.y + area.height.saturating_sub(3),
+            width: area.width,
+            height: 3,
+        };
 
-        debug_list.render(area, buf);
+        // Render header with log count
+        let header_text = format!(
+            "TUI Debug ({} messages) | Server logs are in Server tab",
+            self.debug_info.len()
+        );
+        let header = Paragraph::new(header_text)
+            .block(Block::default().borders(Borders::ALL).title("Debug Panel"))
+            .style(Style::default().fg(Color::Cyan));
+        header.render(header_area, buf);
+
+        // Only show TUI debug messages in debug panel (server logs are in server tab)
+        let mut all_items = Vec::new();
+
+        // Add TUI debug messages
+        for info in &self.debug_info {
+            all_items.push(
+                ListItem::new(format!("[TUI] {}", info)).style(Style::default().fg(Color::Magenta)),
+            );
+        }
+
+        // Create scrollable list
+        let list = List::new(all_items).block(Block::default().borders(Borders::ALL).title("Logs"));
+
+        ratatui::widgets::Widget::render(list, server_logs_area, buf);
     }
 }
 
@@ -510,9 +618,9 @@ impl App {
         let footer_text = match self.selected_tab {
             SelectedTab::Server => {
                 if self.server_state.creating_cloudfolder {
-                    "Type profile name and folder path, press Tab to switch fields, Enter to confirm, Esc to cancel"
+                    "Type cloudfolder name and folder path, press Tab to switch fields, Enter to confirm, Esc to cancel"
                 } else {
-                    "j/k to navigate profiles | s to start/stop server | n to create profile | d to delete profile | q to quit"
+                    "j/k to navigate cloudfolders | s to start/stop server | n to create cloudfolder | d to delete cloudfolder | q to quit"
                 }
             }
             SelectedTab::Settings => {

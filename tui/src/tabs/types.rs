@@ -68,7 +68,7 @@ impl SelectedTab {
 impl SelectedTab {
     pub fn render_tab(
         self,
-        app: &crate::models::App,
+        app: &mut crate::models::App,
         area: Rect,
         buf: &mut ratatui::buffer::Buffer,
     ) {

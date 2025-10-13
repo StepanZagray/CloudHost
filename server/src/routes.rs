@@ -702,7 +702,7 @@ async fn browse_directory_internal(
             </div>
             
             <div class="breadcrumb">
-                <a href="/{}/files">📁 Root</a>
+                <a href="/">🏠 All Cloud Folders</a> / <a href="/{}/files">📁 Root</a>
                 {}
             </div>
             

@@ -24,4 +24,5 @@ anyhow = { workspace = true }
 tokio = { workspace = true }
 dirs = "5.0"
 cloudhost-server = { path = "../server" }
+cloudhost-shared = { path = "../shared" }
 tracing-subscriber = "0.3"
