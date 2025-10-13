@@ -329,13 +329,9 @@ pub async fn index(
                 format!(
                     r#"<div class="cloudfolder-item">
                         <h3>📁 <a href="/{}">{}</a></h3>
-                        <p>Path: {}</p>
                         <p><a href="/{}/files">Browse Files</a></p>
                     </div>"#,
-                    cloudfolder.name,
-                    cloudfolder.name,
-                    cloudfolder.folder_path.display(),
-                    cloudfolder.name
+                    cloudfolder.name, cloudfolder.name, cloudfolder.name
                 )
             })
             .collect::<Vec<_>>()
@@ -418,8 +414,7 @@ pub async fn status(
         "cloudfolders": cloudfolder_list.len(),
         "cloudfolder_list": cloudfolder_list.iter().map(|cf| json!({
             "name": cf.name,
-            "id": cf.id,
-            "folder_path": cf.folder_path
+            "id": cf.id
         })).collect::<Vec<_>>(),
         "timestamp": chrono::Utc::now()
     });
@@ -455,7 +450,6 @@ pub async fn get_cloudfolders_list(
             json!({
                 "name": cf.name,
                 "id": cf.id,
-                "folder_path": cf.folder_path,
                 "created_at": cf.created_at
             })
         })
@@ -764,7 +758,7 @@ pub async fn browse_file_or_directory(
             StatusCode::NOT_FOUND,
             axum::Json(json!({
                 "error": "Not Found",
-                "message": format!("Path not found: {}", path)
+                "message": "The requested resource was not found"
             })),
         ));
     }
@@ -814,7 +808,6 @@ pub async fn browse_file_or_directory(
                     <h1>📄 File: {}</h1>
                     <div class="file-info">
                         <p><strong>File:</strong> {}</p>
-                        <p><strong>Path:</strong> {}</p>
                         <p><strong>Cloud Folder:</strong> {}</p>
                         <a href="/{}/static/{}" class="download-btn">⬇️ Download File</a>
                     </div>
@@ -822,13 +815,7 @@ pub async fn browse_file_or_directory(
             </body>
             </html>
             "#,
-            file_name,
-            file_name,
-            file_name,
-            cloudfolder_name,
-            cloudfolder_name,
-            path,
-            cloudfolder_name
+            file_name, file_name, cloudfolder_name, cloudfolder_name, path, cloudfolder_name
         );
 
         Ok(Html(html))
@@ -886,7 +873,7 @@ pub async fn download_file(
             StatusCode::NOT_FOUND,
             axum::Json(json!({
                 "error": "Not Found",
-                "message": format!("File not found: {}", file_path)
+                "message": "The requested file was not found"
             })),
         ));
     }

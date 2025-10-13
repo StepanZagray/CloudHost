@@ -78,7 +78,9 @@ impl App {
         };
 
         match std::fs::read_to_string(&expanded_path) {
-            Ok(content) => toml::from_str::<cloudhost_server::ServerConfig>(&content).unwrap_or_default(),
+            Ok(content) => {
+                toml::from_str::<cloudhost_server::ServerConfig>(&content).unwrap_or_default()
+            }
             Err(_e) => {
                 // Server will handle its own logging - just use default config
                 cloudhost_server::ServerConfig::default()
