@@ -6,7 +6,6 @@ use ratatui::{
     widgets::{Tabs, Widget},
 };
 use strum::IntoEnumIterator;
-use toml;
 
 use crate::tabs::{client, focus::TabFocus, server, settings, SelectedTab};
 
@@ -36,17 +35,12 @@ pub enum AppState {
     Quitting,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum InputState {
+    #[default]
     Normal,
     NumberPrefix,
     KeySequence(String, std::time::Instant), // Stores the current key sequence and when it started
-}
-
-impl Default for InputState {
-    fn default() -> Self {
-        InputState::Normal
-    }
 }
 
 impl App {
@@ -65,9 +59,9 @@ impl App {
     }
 
     fn load_server_config(server_config_path: &str) -> cloudhost_server::ServerConfig {
-        let expanded_path = if server_config_path.starts_with("~/") {
+        let expanded_path = if let Some(stripped) = server_config_path.strip_prefix("~/") {
             if let Some(home) = dirs::home_dir() {
-                home.join(&server_config_path[2..])
+                home.join(stripped)
             } else {
                 std::path::PathBuf::from(server_config_path)
             }
@@ -75,14 +69,19 @@ impl App {
             std::path::PathBuf::from(server_config_path)
         };
 
-        if let Ok(content) = std::fs::read_to_string(&expanded_path) {
-            if let Ok(server_config) = toml::from_str::<cloudhost_server::ServerConfig>(&content) {
-                return server_config;
+        match std::fs::read_to_string(&expanded_path) {
+            Ok(content) => match toml::from_str::<cloudhost_server::ServerConfig>(&content) {
+                Ok(server_config) => server_config,
+                Err(e) => {
+                    eprintln!("Warning: Failed to parse server config: {}", e);
+                    cloudhost_server::ServerConfig::default()
+                }
+            },
+            Err(e) => {
+                eprintln!("Warning: Could not read server config file: {}", e);
+                cloudhost_server::ServerConfig::default()
             }
         }
-
-        // Return default config if file doesn't exist or is invalid
-        cloudhost_server::ServerConfig::default()
     }
 
     pub fn next_tab(&mut self) {
@@ -262,17 +261,15 @@ impl App {
         }
 
         // Handle password creation modal
-        if self.settings_state.creating_password {
-            if self.settings_state.handle_password_input(key) {
-                // If password creation is complete, handle it
-                if self.settings_state.password_mode
-                    == crate::tabs::settings::models::PasswordMode::Confirming
-                    && self.settings_state.password_input == self.settings_state.password_confirm
-                {
-                    self.complete_password_creation();
-                }
-                return;
+        if self.settings_state.creating_password && self.settings_state.handle_password_input(key) {
+            // If password creation is complete, handle it
+            if self.settings_state.password_mode
+                == crate::tabs::settings::models::PasswordMode::Confirming
+                && self.settings_state.password_input == self.settings_state.password_confirm
+            {
+                self.complete_password_creation();
             }
+            return;
         }
 
         // Handle leader key sequences first
@@ -336,7 +333,7 @@ impl App {
                     && // Skip if it's a single special key (starts with <, ends with >, and doesn't contain another <)
                     !(k.starts_with('<') && k.ends_with('>') && !k[1..k.len() - 1].contains('<'))
             })
-            .map(|k| k.clone())
+            .cloned()
             .collect();
 
         if !potential_sequences.is_empty() {

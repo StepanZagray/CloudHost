@@ -10,7 +10,13 @@ use std::{
 use tower_http::cors::CorsLayer;
 // Remove tracing import to avoid stdout output
 
-use crate::{auth::AuthState, cloud_folder::CloudFolder, config::ServerConfig, routes};
+use crate::{
+    auth::AuthState,
+    cloud_folder::CloudFolder,
+    config::ServerConfig,
+    error::{ServerError, ServerResult},
+    routes,
+};
 
 // Combined state for the server
 #[derive(Clone)]
@@ -80,21 +86,24 @@ impl CloudServer {
         }
     }
 
-    pub fn start_server(&mut self, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn start_server(&mut self, port: u16) -> ServerResult<()> {
         if self.server_handle.is_some() {
-            return Err("Server is already running".into());
+            return Err(ServerError::internal("Server is already running"));
         }
 
         // Check if password is set
         if !self.config.has_password() {
-            return Err(
-                "Cannot start server: No password set. Please set a password in settings first."
-                    .into(),
-            );
+            return Err(ServerError::configuration(
+                "Cannot start server: No password set. Please set a password in settings first.",
+            ));
         }
 
         let cloudfolders = self.cloudfolders.clone();
-        let auth_state = self.auth_state.as_ref().unwrap().clone();
+        let auth_state = self
+            .auth_state
+            .as_ref()
+            .ok_or_else(|| ServerError::internal("Auth state not initialized"))?
+            .clone();
         let server_state = ServerState {
             cloudfolders,
             auth_state,
@@ -129,17 +138,25 @@ impl CloudServer {
         let handle = tokio::spawn(async move {
             let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-            let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+            let listener = match tokio::net::TcpListener::bind(addr).await {
+                Ok(listener) => listener,
+                Err(e) => {
+                    eprintln!("Failed to bind to address: {}", e);
+                    return;
+                }
+            };
 
             // Use the shutdown signal for graceful shutdown
             let shutdown_signal = async {
                 let _ = shutdown_rx.await;
             };
 
-            axum::serve(listener, app)
+            if let Err(e) = axum::serve(listener, app)
                 .with_graceful_shutdown(shutdown_signal)
                 .await
-                .unwrap();
+            {
+                eprintln!("Server error: {}", e);
+            }
         });
 
         self.server_handle = Some(handle);
@@ -167,9 +184,11 @@ impl CloudServer {
         self.port
     }
 
-    pub fn set_password(&mut self, password: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn set_password(&mut self, password: &str) -> ServerResult<()> {
         if password.len() < 8 {
-            return Err("Password must be at least 8 characters long".into());
+            return Err(ServerError::validation(
+                "Password must be at least 8 characters long",
+            ));
         }
 
         // Check if password is actually changing
@@ -196,7 +215,7 @@ impl CloudServer {
 
     /// Invalidates all existing tokens by generating a new JWT secret
     /// This should be called whenever the password is changed
-    pub fn invalidate_all_tokens(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn invalidate_all_tokens(&mut self) -> ServerResult<()> {
         // Generate a new JWT secret to invalidate all existing tokens
         self.config.jwt_secret = crate::config::generate_jwt_secret();
         self.config.password_changed_at = Some(chrono::Utc::now());
@@ -214,7 +233,7 @@ impl CloudServer {
 
     /// Creates an AuthState for token-based authentication
     /// This can be used when implementing full authentication middleware
-    pub fn create_auth_state(&self) -> Arc<crate::auth::AuthState> {
-        self.auth_state.as_ref().unwrap().clone()
+    pub fn create_auth_state(&self) -> Option<Arc<crate::auth::AuthState>> {
+        self.auth_state.as_ref().map(|auth| auth.clone())
     }
 }

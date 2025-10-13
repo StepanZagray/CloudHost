@@ -103,8 +103,7 @@ pub async fn auth_middleware(
     // Check for Authorization header
     if let Some(auth_header) = headers.get("Authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
-            if auth_str.starts_with("Bearer ") {
-                let token = &auth_str[7..];
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
                 if auth_state.verify_token(token).is_ok() {
                     return Ok(next.run(request).await);
                 }

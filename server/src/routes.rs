@@ -213,8 +213,7 @@ fn has_valid_token(headers: &HeaderMap, auth_state: &AuthState) -> bool {
     // Check Authorization header
     if let Some(auth_header) = headers.get("Authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
-            if auth_str.starts_with("Bearer ") {
-                let token = &auth_str[7..];
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
                 if auth_state.verify_token(token).is_ok() {
                     return true;
                 }
@@ -227,8 +226,7 @@ fn has_valid_token(headers: &HeaderMap, auth_state: &AuthState) -> bool {
         if let Ok(cookie_str) = cookie_header.to_str() {
             for cookie in cookie_str.split(';') {
                 let cookie = cookie.trim();
-                if cookie.starts_with("auth_token=") {
-                    let token = &cookie[11..];
+                if let Some(token) = cookie.strip_prefix("auth_token=") {
                     if auth_state.verify_token(token).is_ok() {
                         return true;
                     }

@@ -48,7 +48,7 @@ pub fn render_settings_tab(app: &App, area: Rect, buf: &mut Buffer) {
         .server_state
         .server
         .as_ref()
-        .map_or(false, |s| s.has_password())
+        .is_some_and(|s| s.has_password())
     {
         "✅ Password is set"
     } else {

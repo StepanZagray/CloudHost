@@ -1,3 +1,4 @@
+use crate::error::ServerResult;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -8,7 +9,7 @@ pub fn generate_jwt_secret() -> String {
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs();
 
     let mut hasher = DefaultHasher::new();
@@ -40,9 +41,9 @@ impl Default for ServerConfig {
 impl ServerConfig {
     pub fn expand_path(&self) -> PathBuf {
         let path = self.cloudfolders_path.as_str();
-        if path.starts_with("~/") {
+        if let Some(stripped) = path.strip_prefix("~/") {
             if let Some(home) = dirs::home_dir() {
-                return home.join(&path[2..]);
+                return home.join(stripped);
             }
         }
         PathBuf::from(path)
@@ -67,7 +68,7 @@ impl ServerConfig {
         }
     }
 
-    pub fn load_from_file() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load_from_file() -> ServerResult<Self> {
         let config_path = "server/config.toml";
         if std::path::Path::new(config_path).exists() {
             let config_str = std::fs::read_to_string(config_path)?;
@@ -78,7 +79,7 @@ impl ServerConfig {
         }
     }
 
-    pub fn save_to_file(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save_to_file(&self) -> ServerResult<()> {
         let config_str = toml::to_string_pretty(self)?;
         std::fs::write("server/config.toml", config_str)?;
         Ok(())

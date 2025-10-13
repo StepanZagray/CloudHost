@@ -283,7 +283,10 @@ impl ServerState {
     }
 
     pub fn get_cloudfolders_toml_path() -> PathBuf {
-        let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+        let mut path = dirs::data_dir().unwrap_or_else(|| {
+            eprintln!("Warning: Could not determine data directory, using current directory");
+            PathBuf::from(".")
+        });
         path.push("CloudTUI");
         path.push("cloudfolders.toml");
         path
@@ -364,10 +367,10 @@ impl ServerState {
     }
 
     pub fn expand_path(&self, path: &str) -> String {
-        if path.starts_with("~/") {
+        if let Some(stripped) = path.strip_prefix("~/") {
             if let Some(home) = dirs::home_dir() {
                 let mut expanded_path = home;
-                expanded_path.push(&path[2..]);
+                expanded_path.push(stripped);
                 return expanded_path.to_string_lossy().to_string();
             }
         }
@@ -412,7 +415,7 @@ impl ServerState {
     }
 
     pub fn is_server_running(&self) -> bool {
-        self.server.as_ref().map_or(false, |s| s.is_running())
+        self.server.as_ref().is_some_and(|s| s.is_running())
     }
 
     pub fn get_server_port(&self) -> Option<u16> {

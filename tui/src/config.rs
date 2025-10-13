@@ -1,3 +1,4 @@
+use crate::error::{TuiError, TuiResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -83,7 +84,7 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load() -> TuiResult<Self> {
         // Try multiple possible locations for TUI config.toml
         let possible_paths = [
             "tui/config.toml",
@@ -93,17 +94,24 @@ impl Config {
         ];
 
         for path in &possible_paths {
-            if let Ok(config_str) = std::fs::read_to_string(path) {
-                // Try to parse as TUI config
-                if let Ok(config) = toml::from_str::<Config>(&config_str) {
-                    return Ok(config);
+            match std::fs::read_to_string(path) {
+                Ok(config_str) => {
+                    // Try to parse as TUI config
+                    match toml::from_str::<Config>(&config_str) {
+                        Ok(config) => return Ok(config),
+                        Err(_) => {
+                            // If it fails, it might be a server config file, so skip it
+                            continue;
+                        }
+                    }
                 }
-                // If it fails, it might be a server config file, so skip it
-                continue;
+                Err(_) => continue,
             }
         }
 
-        Err("Could not find valid TUI config.toml in any expected location".into())
+        Err(TuiError::configuration(
+            "Could not find valid TUI config.toml in any expected location",
+        ))
     }
 
     pub fn load_or_default() -> Self {

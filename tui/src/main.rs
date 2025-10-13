@@ -8,6 +8,7 @@ mod config;
 mod error;
 mod models;
 mod tabs;
+use error::TuiResult;
 use models::App;
 
 #[tokio::main]
@@ -36,7 +37,7 @@ impl App {
         Ok(())
     }
 
-    fn handle_events(&mut self) -> std::io::Result<()> {
+    fn handle_events(&mut self) -> TuiResult<()> {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 self.handle_dynamic_key(key.code, key.modifiers);
