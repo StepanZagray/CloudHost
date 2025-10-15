@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     widgets::{
-        Block, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        Block, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
         StatefulWidget, Widget,
     },
 };
@@ -43,8 +43,10 @@ pub fn render_server_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
         })
         .collect();
 
-    let mut list_state = ListState::default();
-    list_state.select(Some(app.server_state.selected_cloudfolder_index));
+    // Ensure we have a selection if none exists
+    if app.server_state.cloudfolders_list_state.selected().is_none() && !cloudfolder_items.is_empty() {
+        app.server_state.cloudfolders_list_state.select(Some(0));
+    }
 
     // Add focus indicator to title
     let cloudfolder_title = if app.server_state.focused_panel == FocusedPanel::CloudFolders {
@@ -53,7 +55,7 @@ pub fn render_server_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
         "Cloud folders"
     };
 
-    let cloudfolder_list = List::new(cloudfolder_items)
+    let cloudfolder_list = List::new(cloudfolder_items.clone())
         .block(
             Block::default()
                 .borders(ratatui::widgets::Borders::ALL)
@@ -69,9 +71,31 @@ pub fn render_server_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
                     },
                 ),
         )
-        .highlight_style(Style::default().fg(Color::Yellow));
+        .highlight_style(Style::default().fg(Color::Yellow))
+        .highlight_symbol(">> ");
 
-    Widget::render(cloudfolder_list, three_column_chunks[0], buf);
+    // Render the list with persistent state
+    StatefulWidget::render(
+        cloudfolder_list,
+        three_column_chunks[0],
+        buf,
+        &mut app.server_state.cloudfolders_list_state,
+    );
+
+    // Render scrollbar for cloudfolders
+    let mut scroll_state = app.server_state.cloudfolders_scroll_state;
+    scroll_state = scroll_state.content_length(cloudfolder_items.len());
+    if let Some(selected) = app.server_state.cloudfolders_list_state.selected() {
+        scroll_state = scroll_state.position(selected);
+    }
+
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(Some("↑"))
+        .end_symbol(Some("↓"));
+    scrollbar.render(three_column_chunks[0], buf, &mut scroll_state);
+
+    // Update the persistent scroll state
+    app.server_state.cloudfolders_scroll_state = scroll_state;
 
     // Right side: Server controls and info
     let server_status = if app.server_state.is_server_running() {

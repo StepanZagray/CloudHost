@@ -1,10 +1,10 @@
 [package]
 name = "cloudhost-shared"
-version = "0.1.0"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
 
 [dependencies]
-tokio = { version = "1.0", features = ["sync", "rt", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 chrono = { version = "0.4", features = ["serde"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true }
 dirs = "5.0"

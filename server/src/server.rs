@@ -91,11 +91,12 @@ impl CloudServer {
         if let Ok(mut cloudfolders) = self.cloudfolders.lock() {
             cloudfolders.insert(cloudfolder.name.clone(), cloudfolder.clone());
         }
-        
+
         // Add to config and save
-        self.config.add_cloudfolder(cloudfolder.name.clone(), cloudfolder.folder_path.clone());
+        self.config
+            .add_cloudfolder(cloudfolder.name.clone(), cloudfolder.folder_path.clone());
         self.config.save_to_file()?;
-        
+
         Ok(())
     }
 
@@ -104,11 +105,11 @@ impl CloudServer {
         if let Ok(mut cloudfolders) = self.cloudfolders.lock() {
             cloudfolders.remove(cloudfolder_name);
         }
-        
+
         // Remove from config and save
         self.config.remove_cloudfolder(cloudfolder_name);
         self.config.save_to_file()?;
-        
+
         Ok(())
     }
 
@@ -184,7 +185,11 @@ impl CloudServer {
             )
             .route(
                 "/:cloudfolder_name/static/*path",
-                get(routes::browse_file_or_directory),
+                get(routes::serve_static_file),
+            )
+            .route(
+                "/api/:cloudfolder_name/static/*path",
+                get(routes::serve_static_file),
             )
             .layer(CorsLayer::permissive())
             .with_state(server_state);

@@ -1,5 +1,6 @@
 use ratatui::{
     buffer::Buffer,
+    crossterm::event::KeyCode,
     layout::Rect,
     prelude::Stylize,
     text::Line,
@@ -279,8 +280,6 @@ impl App {
         key: ratatui::crossterm::event::KeyCode,
         modifiers: ratatui::crossterm::event::KeyModifiers,
     ) {
-        use ratatui::crossterm::event::KeyCode;
-
         // Convert key to string for config lookup
         let key_str = match key {
             KeyCode::Char(c) => {
@@ -583,7 +582,12 @@ impl App {
 }
 
 pub fn render_title(area: Rect, buf: &mut Buffer) {
-    "CloudTUI".bold().render(area, buf);
+    let title = if cloudhost_shared::config_paths::is_dev_mode() {
+        "CloudHost (dev)"
+    } else {
+        "CloudHost"
+    };
+    title.bold().render(area, buf);
 }
 
 impl App {

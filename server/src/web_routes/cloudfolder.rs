@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
-    response::Html,
+    http::{header, HeaderMap, StatusCode},
+    response::{Html, Json, Response},
 };
 use serde_json::json;
 use std::{collections::HashMap, fs, sync::Arc};
@@ -585,4 +585,166 @@ fn generate_file_list(items: &[serde_json::Value], cloudfolder_name: &str) -> St
     }
 
     html
+}
+
+pub async fn serve_static_file(
+    State(server_state): State<ServerState>,
+    Path((cloudfolder_name, path)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response<axum::body::Body>, Json<serde_json::Value>> {
+    // Check authentication for web routes (API routes can skip this)
+    let auth_state = get_authentication_state(&server_state);
+    if !has_valid_token(&headers, auth_state) {
+        return Err(Json(json!({
+            "error": "Unauthorized",
+            "message": "Authentication required"
+        })));
+    }
+
+    let cloudfolder = {
+        let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
+            Json(json!({
+                "error": "Server Error",
+                "message": "Failed to access cloud folders. Please try again later."
+            }))
+        })?;
+        cloudfolders_guard
+            .get(&cloudfolder_name)
+            .ok_or_else(|| {
+                Json(json!({
+                    "error": "Not Found",
+                    "message": "The requested cloud folder was not found."
+                }))
+            })?
+            .clone()
+    };
+
+    let full_path = cloudfolder.folder_path.join(&path);
+
+    // Security check: ensure the requested path is within the cloudfolder directory
+    if !full_path.starts_with(&cloudfolder.folder_path) {
+        return Err(Json(json!({
+            "error": "Forbidden",
+            "message": "You don't have permission to access this file."
+        })));
+    }
+
+    if !full_path.exists() || full_path.is_dir() {
+        return Err(Json(json!({
+            "error": "Not Found",
+            "message": "The requested file was not found."
+        })));
+    }
+
+    // Read file content
+    let file_content = match fs::read(&full_path) {
+        Ok(content) => content,
+        Err(_) => {
+            return Err(Json(json!({
+                "error": "Error",
+                "message": "Failed to read the requested file."
+            })));
+        }
+    };
+
+    // Get file extension to determine MIME type
+    let mime_type = get_mime_type(&full_path);
+
+    // Create response with proper headers
+    let mut response = Response::new(axum::body::Body::from(file_content));
+    let headers = response.headers_mut();
+
+    headers.insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_str(&mime_type)
+            .unwrap_or_else(|_| header::HeaderValue::from_static("application/octet-stream")),
+    );
+
+    // Add filename for inline display
+    if let Some(file_name) = full_path.file_name().and_then(|n| n.to_str()) {
+        headers.insert(
+            header::CONTENT_DISPOSITION,
+            header::HeaderValue::from_str(&format!("inline; filename=\"{}\"", file_name))
+                .unwrap_or_else(|_| header::HeaderValue::from_static("inline")),
+        );
+    }
+
+    Ok(response)
+}
+
+fn get_mime_type(path: &std::path::Path) -> &'static str {
+    if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+        match extension.to_lowercase().as_str() {
+            // Images
+            "jpg" | "jpeg" => "image/jpeg",
+            "png" => "image/png",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            "svg" => "image/svg+xml",
+            "bmp" => "image/bmp",
+            "ico" => "image/x-icon",
+
+            // Text files
+            "txt" => "text/plain",
+            "html" | "htm" => "text/html",
+            "css" => "text/css",
+            "js" => "application/javascript",
+            "json" => "application/json",
+            "xml" => "application/xml",
+            "csv" => "text/csv",
+            "md" | "markdown" => "text/markdown",
+
+            // Documents
+            "pdf" => "application/pdf",
+            "doc" => "application/msword",
+            "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xls" => "application/vnd.ms-excel",
+            "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "ppt" => "application/vnd.ms-powerpoint",
+            "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+
+            // Archives
+            "zip" => "application/zip",
+            "rar" => "application/x-rar-compressed",
+            "7z" => "application/x-7z-compressed",
+            "tar" => "application/x-tar",
+            "gz" => "application/gzip",
+
+            // Audio
+            "mp3" => "audio/mpeg",
+            "wav" => "audio/wav",
+            "ogg" => "audio/ogg",
+            "flac" => "audio/flac",
+
+            // Video
+            "mp4" => "video/mp4",
+            "avi" => "video/x-msvideo",
+            "mov" => "video/quicktime",
+            "wmv" => "video/x-ms-wmv",
+            "webm" => "video/webm",
+
+            // Code files
+            "rs" => "text/plain",
+            "py" => "text/plain",
+            "java" => "text/plain",
+            "cpp" | "cc" | "cxx" => "text/plain",
+            "c" => "text/plain",
+            "h" => "text/plain",
+            "hpp" => "text/plain",
+            "cs" => "text/plain",
+            "php" => "text/plain",
+            "rb" => "text/plain",
+            "go" => "text/plain",
+            "swift" => "text/plain",
+            "kt" => "text/plain",
+            "scala" => "text/plain",
+            "sh" => "text/plain",
+            "bat" => "text/plain",
+            "ps1" => "text/plain",
+
+            _ => "application/octet-stream",
+        }
+    } else {
+        "application/octet-stream"
+    }
 }

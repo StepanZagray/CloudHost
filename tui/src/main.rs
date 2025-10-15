@@ -1,3 +1,4 @@
+use clap::Parser;
 use color_eyre::Result;
 use ratatui::{
     crossterm::event::{self, Event, KeyEventKind},
@@ -12,9 +13,44 @@ use cloudhost_shared::debug_stream::init_debug_stream;
 use error::TuiResult;
 use models::App;
 
+/// CloudHost TUI - Personal Cloud Storage Server
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Force development mode (configs in project root)
+    #[arg(long)]
+    dev: bool,
+
+    /// Force production mode (configs in appdata)
+    #[arg(long)]
+    prod: bool,
+
+    /// Enable debug logging
+    #[arg(short = 'v', long)]
+    debug: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
+
+    // Parse command line arguments
+    let args = Args::parse();
+
+    // Set environment variables based on command line arguments
+    if args.dev {
+        std::env::set_var("CLOUDHOST_DEV", "1");
+    } else if args.prod {
+        std::env::remove_var("CLOUDHOST_DEV");
+        std::env::remove_var("CARGO");
+        std::env::remove_var("DEBUG");
+        std::env::remove_var("RUST_LOG");
+    }
+
+    if args.debug {
+        std::env::set_var("RUST_LOG", "debug");
+        std::env::set_var("DEBUG", "1");
+    }
 
     // Don't initialize global tracing to avoid breaking TUI
     // tracing_subscriber::fmt::init();
@@ -36,7 +72,7 @@ async fn main() -> Result<()> {
                 .warn(
                     "TUI",
                     &format!(
-                        "Could not load config.toml ({}), using default keybindings",
+                        "Could not load tui-config.toml ({}), using default keybindings",
                         e
                     ),
                 )

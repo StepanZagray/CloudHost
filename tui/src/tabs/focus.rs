@@ -13,14 +13,6 @@ pub trait TabFocus {
 
     /// Handle navigation within the focused element
     fn handle_navigation(&mut self, key: KeyCode) -> bool;
-
-    /// Check if this tab has focusable elements
-    #[allow(dead_code)]
-    fn has_focusable_elements(&self) -> bool;
-
-    /// Get the number of focusable elements in this tab
-    #[allow(dead_code)]
-    fn focusable_elements_count(&self) -> usize;
 }
 
 /// Default implementation for tabs that don't need focus management
@@ -35,13 +27,5 @@ impl TabFocus for () {
 
     fn handle_navigation(&mut self, _key: KeyCode) -> bool {
         false
-    }
-
-    fn has_focusable_elements(&self) -> bool {
-        false
-    }
-
-    fn focusable_elements_count(&self) -> usize {
-        0
     }
 }

@@ -24,11 +24,4 @@ impl TabFocus for ClientState {
         false
     }
 
-    fn has_focusable_elements(&self) -> bool {
-        true
-    }
-
-    fn focusable_elements_count(&self) -> usize {
-        1 // Just the main client area
-    }
 }

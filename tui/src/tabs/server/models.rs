@@ -27,6 +27,8 @@ pub struct ServerState {
     pub server_port: Option<u16>,
     pub server_logs_list_state: ListState, // For scrollable server logs
     pub server_logs_scroll_state: ScrollbarState, // For scrollbar
+    pub cloudfolders_list_state: ListState, // For scrollable cloudfolders
+    pub cloudfolders_scroll_state: ScrollbarState, // For cloudfolders scrollbar
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +62,8 @@ impl Default for ServerState {
             server_port: None,
             server_logs_list_state: ListState::default(),
             server_logs_scroll_state: ScrollbarState::default(),
+            cloudfolders_list_state: ListState::default(),
+            cloudfolders_scroll_state: ScrollbarState::default(),
         }
     }
 }
@@ -184,7 +188,7 @@ impl ServerState {
         // Check if password is set
         if let Some(ref server) = self.server {
             if !server.has_password() {
-                self.server_start_error = Some("❌ Cannot start server: No password set. Go to Settings tab and press 'p' to create a password.".to_string());
+                self.server_start_error = Some("❌ Cannot start server: No password set.\nGo to Settings tab and press 'p' to create a password.".to_string());
                 return;
             }
         }
@@ -476,14 +480,6 @@ impl TabFocus for ServerState {
             _ => false,
         }
     }
-
-    fn has_focusable_elements(&self) -> bool {
-        true
-    }
-
-    fn focusable_elements_count(&self) -> usize {
-        3 // Cloudfolders, ServerInfo, ServerLogs
-    }
 }
 
 impl ServerState {
@@ -495,8 +491,6 @@ impl ServerState {
     }
 
     pub fn handle_cloudfolder_input(&mut self, key: ratatui::crossterm::event::KeyCode) {
-        use ratatui::crossterm::event::KeyCode;
-
         match key {
             KeyCode::Enter => {
                 if self.cloudfolder_input_field == CloudFolderInputField::Name {
