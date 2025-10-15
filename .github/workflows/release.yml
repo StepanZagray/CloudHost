@@ -47,6 +47,39 @@ jobs:
         CARGO_TERM_COLOR: always
         RUST_BACKTRACE: 1
     
+    - name: Sign Windows executable
+      if: matrix.os == 'windows-latest'
+      run: |
+        Write-Host "Creating self-signed certificate for code signing..."
+        
+        # Create self-signed certificate
+        $cert = New-SelfSignedCertificate `
+          -Type CodeSigningCert `
+          -Subject "CN=CloudHost, O=Stepan Zagray, C=US" `
+          -KeyUsage DigitalSignature `
+          -FriendlyName "CloudHost Code Signing Certificate" `
+          -CertStoreLocation "Cert:\CurrentUser\My" `
+          -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}") `
+          -NotAfter (Get-Date).AddYears(1)
+        
+        Write-Host "Certificate created with thumbprint: $($cert.Thumbprint)"
+        
+        # Export certificate to PFX
+        $securePassword = ConvertTo-SecureString -String "CloudHost2024!" -Force -AsPlainText
+        Export-PfxCertificate -Cert $cert -FilePath "cloudhost-cert.pfx" -Password $securePassword
+        
+        Write-Host "Signing executable with self-signed certificate..."
+        
+        # Sign the executable with timestamp
+        signtool sign /f cloudhost-cert.pfx /p "CloudHost2024!" /t http://timestamp.digicert.com /d "CloudHost - Personal Cloud Storage Server" /du "https://github.com/StepanZagray/CloudHost" target/${{ matrix.target }}/release/cloudhost-tui.exe
+        
+        Write-Host "Verifying signature..."
+        
+        # Verify signature
+        signtool verify /pa target/${{ matrix.target }}/release/cloudhost-tui.exe
+        
+        Write-Host "✅ Executable signed successfully!"
+    
     - name: Create release artifacts (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
@@ -102,9 +135,13 @@ jobs:
         draft: false
         prerelease: false
         body: |
+          ## Code Signing
+          
+          The Windows executable is signed with a self-signed certificate to reduce false positive antivirus warnings.
+          
           ## Windows Defender Warning
           
-          If Windows Defender shows a virus warning:
+          If Windows Defender still shows a warning:
           1. Click "More info" 
           2. Click "Run anyway"
           3. Or add an exception in Windows Security
@@ -120,6 +157,13 @@ jobs:
           
           # Windows (PowerShell)
           Get-FileHash cloudhost-tui.exe -Algorithm SHA256
+          ```
+          
+          ## Signature Verification (Windows)
+          
+          To verify the code signature:
+          ```powershell
+          Get-AuthenticodeSignature cloudhost-tui.exe
           ```
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
