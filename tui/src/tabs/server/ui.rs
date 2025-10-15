@@ -199,18 +199,21 @@ pub fn render_server_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
         .highlight_symbol(">> ");
 
     // Use the persistent ListState from ServerState
-    let mut list_state = app.server_state.server_logs_list_state.clone();
-    if !visible_logs.is_empty() && list_state.selected().is_none() {
+    if !visible_logs.is_empty() && app.server_state.server_logs_list_state.selected().is_none() {
         // Select the last item (newest log) by default if nothing is selected
         let selected_index = visible_logs.len().saturating_sub(1);
-        list_state.select(Some(selected_index));
+        app.server_state
+            .server_logs_list_state
+            .select(Some(selected_index));
     }
 
     // Render the list with state
-    StatefulWidget::render(server_logs, three_column_chunks[2], buf, &mut list_state);
-
-    // Update the persistent state
-    app.server_state.server_logs_list_state = list_state;
+    StatefulWidget::render(
+        server_logs,
+        three_column_chunks[2],
+        buf,
+        &mut app.server_state.server_logs_list_state,
+    );
 
     // Render scrollbar
     let mut scroll_state = app.server_state.server_logs_scroll_state;
