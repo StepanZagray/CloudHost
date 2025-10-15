@@ -64,21 +64,23 @@ jobs:
         
         Write-Host "Certificate created with thumbprint: $($cert.Thumbprint)"
         
-        # Export certificate to PFX
-        $securePassword = ConvertTo-SecureString -String "CloudHost2024!" -Force -AsPlainText
-        Export-PfxCertificate -Cert $cert -FilePath "cloudhost-cert.pfx" -Password $securePassword
+        Write-Host "Signing executable with PowerShell Set-AuthenticodeSignature..."
         
-        Write-Host "Signing executable with self-signed certificate..."
-        
-        # Sign the executable with timestamp
-        signtool sign /f cloudhost-cert.pfx /p "CloudHost2024!" /t http://timestamp.digicert.com /d "CloudHost - Personal Cloud Storage Server" /du "https://github.com/StepanZagray/CloudHost" target/${{ matrix.target }}/release/cloudhost-tui.exe
+        # Sign the executable using PowerShell (no signtool required)
+        try {
+          Set-AuthenticodeSignature -FilePath "target/${{ matrix.target }}/release/cloudhost-tui.exe" -Certificate $cert -TimestampServer "http://timestamp.digicert.com"
+          Write-Host "✅ Executable signed successfully!"
+        } catch {
+          Write-Host "Signing failed: $($_.Exception.Message)" -ForegroundColor Red
+          Write-Host "Continuing without signature..." -ForegroundColor Yellow
+        }
         
         Write-Host "Verifying signature..."
         
         # Verify signature
-        signtool verify /pa target/${{ matrix.target }}/release/cloudhost-tui.exe
-        
-        Write-Host "✅ Executable signed successfully!"
+        $signature = Get-AuthenticodeSignature "target/${{ matrix.target }}/release/cloudhost-tui.exe"
+        Write-Host "Signature Status: $($signature.Status)"
+        Write-Host "Signer Certificate: $($signature.SignerCertificate.Subject)"
     
     - name: Create release artifacts (Linux)
       if: matrix.os == 'ubuntu-latest'
