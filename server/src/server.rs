@@ -70,8 +70,14 @@ impl CloudServer {
                 .await;
             });
         }
+        // Load cloudfolders from config into HashMap for runtime access
+        let mut cloudfolders_map = HashMap::new();
+        for cloudfolder in &config.cloudfolders {
+            cloudfolders_map.insert(cloudfolder.name.clone(), cloudfolder.clone());
+        }
+
         Self {
-            cloudfolders: Arc::new(Mutex::new(HashMap::new())),
+            cloudfolders: Arc::new(Mutex::new(cloudfolders_map)),
             server_handle: None,
             port: None,
             config,
@@ -80,16 +86,30 @@ impl CloudServer {
         }
     }
 
-    pub fn add_cloudfolder(&self, cloudfolder: CloudFolder) {
+    pub fn add_cloudfolder(&mut self, cloudfolder: CloudFolder) -> ServerResult<()> {
+        // Add to runtime HashMap
         if let Ok(mut cloudfolders) = self.cloudfolders.lock() {
-            cloudfolders.insert(cloudfolder.name.clone(), cloudfolder);
+            cloudfolders.insert(cloudfolder.name.clone(), cloudfolder.clone());
         }
+        
+        // Add to config and save
+        self.config.add_cloudfolder(cloudfolder.name.clone(), cloudfolder.folder_path.clone());
+        self.config.save_to_file()?;
+        
+        Ok(())
     }
 
-    pub fn remove_cloudfolder(&self, cloudfolder_name: &str) {
+    pub fn remove_cloudfolder(&mut self, cloudfolder_name: &str) -> ServerResult<()> {
+        // Remove from runtime HashMap
         if let Ok(mut cloudfolders) = self.cloudfolders.lock() {
             cloudfolders.remove(cloudfolder_name);
         }
+        
+        // Remove from config and save
+        self.config.remove_cloudfolder(cloudfolder_name);
+        self.config.save_to_file()?;
+        
+        Ok(())
     }
 
     pub fn get_cloudfolders(&self) -> Vec<CloudFolder> {

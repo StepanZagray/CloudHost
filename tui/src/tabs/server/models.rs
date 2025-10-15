@@ -11,11 +11,6 @@ pub struct CloudFolder {
     pub folder_path: PathBuf,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CloudFoldersConfig {
-    pub cloudfolders: Vec<CloudFolder>,
-}
-
 pub struct ServerState {
     pub cloudfolders: Vec<CloudFolder>,
     pub selected_cloudfolder_index: usize,
@@ -24,6 +19,7 @@ pub struct ServerState {
     pub new_cloudfolder_path: String,
     pub cloudfolder_input_field: CloudFolderInputField, // Which field is currently being edited
     pub cloudfolder_creation_error: Option<String>,
+    pub server_start_error: Option<String>,
     pub server_logs: Vec<String>,
     pub log_scroll_offset: usize,    // For scrolling through logs
     pub focused_panel: FocusedPanel, // Which panel is currently focused
@@ -56,6 +52,7 @@ impl Default for ServerState {
             new_cloudfolder_path: String::new(),
             cloudfolder_input_field: CloudFolderInputField::Name,
             cloudfolder_creation_error: None,
+            server_start_error: None,
             server_logs: Vec::new(),
             log_scroll_offset: 0,
             focused_panel: FocusedPanel::CloudFolders,
@@ -114,7 +111,15 @@ impl ServerState {
         }
 
         // Expand path if it starts with ~
-        let expanded_path = self.expand_path(folder_path);
+        let expanded_path = if let Some(stripped) = folder_path.strip_prefix("~/") {
+            if let Some(home) = dirs::home_dir() {
+                home.join(stripped).to_string_lossy().to_string()
+            } else {
+                folder_path.to_string()
+            }
+        } else {
+            folder_path.to_string()
+        };
         let path_buf = PathBuf::from(&expanded_path);
 
         // Check if the folder exists
@@ -137,13 +142,28 @@ impl ServerState {
             return;
         }
 
-        let cloudfolder = CloudFolder {
-            name: name.to_string(),
-            folder_path: path_buf,
-        };
+        // Create cloudfolder using server's CloudFolder struct
+        let server_cloudfolder = ServerCloudFolder::new(name.to_string(), path_buf);
 
-        self.cloudfolders.push(cloudfolder);
-        self.save_cloudfolders_to_toml();
+        // Add to server (this will also save to config)
+        if let Some(ref mut server) = self.server {
+            if let Err(e) = server.add_cloudfolder(server_cloudfolder) {
+                self.cloudfolder_creation_error = Some(format!("Failed to add cloudfolder: {}", e));
+                return;
+            }
+        }
+
+        // Reload cloudfolders from server config
+        if let Some(ref server) = self.server {
+            self.cloudfolders = server
+                .get_cloudfolders()
+                .iter()
+                .map(|cf| CloudFolder {
+                    name: cf.name.clone(),
+                    folder_path: cf.folder_path.clone(),
+                })
+                .collect();
+        }
 
         self.clear_cloudfolder_creation_input();
     }
@@ -164,6 +184,7 @@ impl ServerState {
         // Check if password is set
         if let Some(ref server) = self.server {
             if !server.has_password() {
+                self.server_start_error = Some("❌ Cannot start server: No password set. Go to Settings tab and press 'p' to create a password.".to_string());
                 return;
             }
         }
@@ -188,15 +209,20 @@ impl ServerState {
                     cloudfolder.name.clone(),
                     cloudfolder.folder_path.clone(),
                 );
-                server.add_cloudfolder(server_cloudfolder);
+                if let Err(e) = server.add_cloudfolder(server_cloudfolder) {
+                    eprintln!("Failed to add cloudfolder to server: {}", e);
+                }
             }
 
             match server.start_server(port) {
-                Ok(_) => (),
+                Ok(_) => {
+                    // Clear any previous server start errors
+                    self.server_start_error = None;
+                }
 
                 Err(e) => {
-                    // Server will handle its own error logging
-                    eprintln!("Failed to start server: {}", e);
+                    // Set error message for display
+                    self.server_start_error = Some(format!("❌ Failed to start server: {}", e));
                 }
             }
         }
@@ -234,106 +260,25 @@ impl ServerState {
     }
 
     pub fn load_cloudfolders(&mut self) {
-        self.load_cloudfolders_from_toml();
+        // Load cloudfolders from server config
+        let server_config = cloudhost_server::ServerConfig::load_from_file().unwrap_or_default();
+        self.load_cloudfolders_with_config(&server_config);
     }
 
     pub fn load_cloudfolders_with_config(&mut self, config: &ServerConfig) {
         self.load_cloudfolders_from_toml_with_config(config);
     }
 
-    pub fn get_cloudfolders_toml_path() -> PathBuf {
-        let mut path = dirs::data_dir().unwrap_or_else(|| {
-            // Server will handle its own logging
-            PathBuf::from(".")
-        });
-        path.push("CloudTUI");
-        path.push("cloudfolders.toml");
-        path
-    }
-
-    pub fn load_cloudfolders_from_toml(&mut self) {
-        let cloudfolders_toml_path = Self::get_cloudfolders_toml_path();
-
-        if let Ok(content) = std::fs::read_to_string(&cloudfolders_toml_path) {
-            if let Ok(cloudfolders_config) = toml::from_str::<CloudFoldersConfig>(&content) {
-                self.cloudfolders = cloudfolders_config.cloudfolders;
-                return;
-            }
-        }
-
-        // Fallback to old method if cloudfolders.toml doesn't exist or is invalid
-        let config = crate::config::Config::load_or_default();
-        let cloudfolders_path = self.expand_path(&config.server_config_path);
-
-        if let Ok(entries) = std::fs::read_dir(&cloudfolders_path) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if entry.path().is_dir() {
-                        let cloudfolder = CloudFolder {
-                            name: name.to_string(),
-                            folder_path: entry.path(),
-                        };
-                        self.cloudfolders.push(cloudfolder);
-                    }
-                }
-            }
-        }
-    }
-
     pub fn load_cloudfolders_from_toml_with_config(&mut self, server_config: &ServerConfig) {
-        let cloudfolders_toml_path = Self::get_cloudfolders_toml_path();
-
-        if let Ok(content) = std::fs::read_to_string(&cloudfolders_toml_path) {
-            if let Ok(cloudfolders_config) = toml::from_str::<CloudFoldersConfig>(&content) {
-                self.cloudfolders = cloudfolders_config.cloudfolders;
-                return;
-            }
-        }
-
-        // Fallback to loading from server config path
-        let cloudfolders_path = server_config.expand_path();
-
-        if let Ok(entries) = std::fs::read_dir(&cloudfolders_path) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if entry.path().is_dir() {
-                        let cloudfolder = CloudFolder {
-                            name: name.to_string(),
-                            folder_path: entry.path(),
-                        };
-                        self.cloudfolders.push(cloudfolder);
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn save_cloudfolders_to_toml(&self) {
-        let cloudfolders_config = CloudFoldersConfig {
-            cloudfolders: self.cloudfolders.clone(),
-        };
-
-        if let Ok(content) = toml::to_string_pretty(&cloudfolders_config) {
-            let cloudfolders_toml_path = Self::get_cloudfolders_toml_path();
-
-            // Create directory if it doesn't exist
-            if let Some(parent) = cloudfolders_toml_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-
-            let _ = std::fs::write(&cloudfolders_toml_path, content);
-        }
-    }
-
-    pub fn expand_path(&self, path: &str) -> String {
-        if let Some(stripped) = path.strip_prefix("~/") {
-            if let Some(home) = dirs::home_dir() {
-                let mut expanded_path = home;
-                expanded_path.push(stripped);
-                return expanded_path.to_string_lossy().to_string();
-            }
-        }
-        path.to_string()
+        // Load cloudfolders directly from server config
+        self.cloudfolders = server_config
+            .cloudfolders
+            .iter()
+            .map(|cf| CloudFolder {
+                name: cf.name.clone(),
+                folder_path: cf.folder_path.clone(),
+            })
+            .collect();
     }
 
     pub fn cloudfolder_exists(&self, name: &str) -> bool {
@@ -344,13 +289,30 @@ impl ServerState {
         if !self.cloudfolders.is_empty()
             && self.selected_cloudfolder_index < self.cloudfolders.len()
         {
-            let _cloudfolder_name = self.cloudfolders[self.selected_cloudfolder_index]
+            let cloudfolder_name = self.cloudfolders[self.selected_cloudfolder_index]
                 .name
                 .clone();
 
-            // Remove from cloudfolders list (no need to delete folder since we're not creating it anymore)
-            self.cloudfolders.remove(self.selected_cloudfolder_index);
-            self.save_cloudfolders_to_toml();
+            // Remove from server (this will also save to config)
+            if let Some(ref mut server) = self.server {
+                if let Err(e) = server.remove_cloudfolder(&cloudfolder_name) {
+                    // Handle error - could add error display to UI
+                    eprintln!("Failed to remove cloudfolder: {}", e);
+                    return;
+                }
+            }
+
+            // Reload cloudfolders from server config
+            if let Some(ref server) = self.server {
+                self.cloudfolders = server
+                    .get_cloudfolders()
+                    .iter()
+                    .map(|cf| CloudFolder {
+                        name: cf.name.clone(),
+                        folder_path: cf.folder_path.clone(),
+                    })
+                    .collect();
+            }
 
             // Adjust selected index if needed
             if self.selected_cloudfolder_index >= self.cloudfolders.len()

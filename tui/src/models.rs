@@ -8,6 +8,7 @@ use ratatui::{
 use strum::IntoEnumIterator;
 
 use crate::tabs::{client, focus::TabFocus, server, settings, SelectedTab};
+use cloudhost_shared::config_paths;
 use cloudhost_shared::debug_stream::{get_debug_stream, DebugMessage};
 
 // Timeout for key sequences (like Vim's timeoutlen)
@@ -52,10 +53,10 @@ impl App {
         let config = crate::config::Config::load_or_default();
 
         // Load server config
-        let server_config = Self::load_server_config(&config.server_config_path);
+        let server_config = Self::load_server_config();
 
         // Create default server config file if it doesn't exist
-        Self::ensure_server_config_file(&config.server_config_path);
+        Self::ensure_server_config_file();
         Self {
             config,
             server_state: server::models::ServerState::new_with_config(&server_config),
@@ -66,18 +67,10 @@ impl App {
         }
     }
 
-    fn load_server_config(server_config_path: &str) -> cloudhost_server::ServerConfig {
-        let expanded_path = if let Some(stripped) = server_config_path.strip_prefix("~/") {
-            if let Some(home) = dirs::home_dir() {
-                home.join(stripped)
-            } else {
-                std::path::PathBuf::from(server_config_path)
-            }
-        } else {
-            std::path::PathBuf::from(server_config_path)
-        };
+    fn load_server_config() -> cloudhost_server::ServerConfig {
+        let config_path = config_paths::get_server_config_path();
 
-        match std::fs::read_to_string(&expanded_path) {
+        match std::fs::read_to_string(&config_path) {
             Ok(content) => {
                 toml::from_str::<cloudhost_server::ServerConfig>(&content).unwrap_or_default()
             }
@@ -88,27 +81,17 @@ impl App {
         }
     }
 
-    fn ensure_server_config_file(server_config_path: &str) {
-        let expanded_path = if let Some(stripped) = server_config_path.strip_prefix("~/") {
-            if let Some(home) = dirs::home_dir() {
-                home.join(stripped)
-            } else {
-                std::path::PathBuf::from(server_config_path)
-            }
-        } else {
-            std::path::PathBuf::from(server_config_path)
-        };
+    fn ensure_server_config_file() {
+        let config_path = config_paths::get_server_config_path();
 
-        // Create the directory if it doesn't exist
-        if let Some(parent) = expanded_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
+        // Ensure the config directory exists
+        let _ = config_paths::ensure_config_dir();
 
         // Create default config file if it doesn't exist
-        if !expanded_path.exists() {
+        if !config_path.exists() {
             let default_config = cloudhost_server::ServerConfig::default();
             if let Ok(config_str) = toml::to_string_pretty(&default_config) {
-                let _ = std::fs::write(&expanded_path, config_str);
+                let _ = std::fs::write(&config_path, config_str);
             }
         }
     }
@@ -251,6 +234,8 @@ impl App {
             } else {
                 self.settings_state.clear_password_creation_input();
                 self.settings_state.password_success = true;
+                // Clear any server start errors since password is now set
+                self.server_state.server_start_error = None;
                 self.add_debug("Password set successfully");
 
                 // If server is running, restart it to pick up the new AuthState
@@ -366,9 +351,8 @@ impl App {
             // Check if the sequence has timed out
             if start_time.elapsed().as_millis() > KEY_SEQUENCE_TIMEOUT_MS as u128 {
                 // Timeout reached, execute the single key if it exists
-                if let Some(keybinding) = self.config.get_keybinding(seq) {
+                if let Some(action) = self.config.get_action_for_key(seq) {
                     if self.config.is_key_valid_for_tab(seq, current_tab) {
-                        let action = keybinding.action.clone();
                         self.execute_action(&action).await;
                     }
                 }
@@ -378,9 +362,8 @@ impl App {
 
             if seq == "<leader>" {
                 let leader_key = format!("<leader>{}", key_str);
-                if let Some(keybinding) = self.config.get_keybinding(&leader_key) {
+                if let Some(action) = self.config.get_action_for_key(&leader_key) {
                     if self.config.is_key_valid_for_tab(&leader_key, current_tab) {
-                        let action = keybinding.action.clone();
                         self.execute_action(&action).await;
                     }
                 }
@@ -389,9 +372,8 @@ impl App {
             } else {
                 // Try to complete the sequence with the current key
                 let complete_key = format!("{}{}", seq, key_str);
-                if let Some(keybinding) = self.config.get_keybinding(&complete_key) {
+                if let Some(action) = self.config.get_action_for_key(&complete_key) {
                     if self.config.is_key_valid_for_tab(&complete_key, current_tab) {
-                        let action = keybinding.action.clone();
                         self.execute_action(&action).await;
                     }
                 }
@@ -406,8 +388,9 @@ impl App {
         // but allow multi-key special keys (like <Ctrl>c, <Alt>f, etc.)
         let potential_sequences: Vec<String> = self
             .config
-            .keybindings
-            .keys()
+            .actions
+            .values()
+            .flat_map(|action| &action.keys)
             .filter(|k| {
                 k.starts_with(&key_str)
                     && k.len() > 1
@@ -427,9 +410,8 @@ impl App {
         }
 
         // Check if key is valid for current tab and process it
-        if let Some(keybinding) = self.config.get_keybinding(&key_str) {
+        if let Some(action) = self.config.get_action_for_key(&key_str) {
             if self.config.is_key_valid_for_tab(&key_str, current_tab) {
-                let action = keybinding.action.clone();
                 self.execute_action(&action).await;
             } else {
                 self.add_debug(&format!(
@@ -483,14 +465,13 @@ impl App {
         if let InputState::KeySequence(ref seq, start_time) = self.input_state {
             if start_time.elapsed().as_millis() > KEY_SEQUENCE_TIMEOUT_MS as u128 {
                 // Timeout reached, execute the single key if it exists
-                if let Some(keybinding) = self.config.get_keybinding(seq) {
+                if let Some(action) = self.config.get_action_for_key(seq) {
                     let current_tab = match self.selected_tab {
                         SelectedTab::Server => "server",
                         SelectedTab::Client => "client",
                         SelectedTab::Settings => "settings",
                     };
                     if self.config.is_key_valid_for_tab(seq, current_tab) {
-                        let action = keybinding.action.clone();
                         self.execute_action(&action).await;
                     }
                 }
@@ -510,7 +491,7 @@ impl Widget for &mut App {
                 Constraint::Length(1),
                 Constraint::Min(0),
                 Constraint::Length(1),
-                Constraint::Length(8), // Debug panel
+                Constraint::Length(12), // Debug panel
             ]);
             let [header_area, inner_area, footer_area, debug_area] = vertical.areas(area);
 
@@ -578,10 +559,7 @@ impl App {
         };
 
         // Render header with log count
-        let header_text = format!(
-            "TUI Debug ({} messages) | Server logs are in Server tab",
-            self.debug_info.len()
-        );
+        let header_text = format!("TUI Debug ({} messages)", self.debug_info.len());
         let header = Paragraph::new(header_text)
             .block(Block::default().borders(Borders::ALL).title("Debug Panel"))
             .style(Style::default().fg(Color::Cyan));

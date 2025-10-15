@@ -99,15 +99,29 @@ pub fn render_server_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
             "Server not running".to_string()
         };
 
-        format!(
+        let mut info = format!(
             "Selected Cloudfolder: {}\nPath: {}\nURL: {}\nTo add files to this cloudfolder,\nadd them to the cloudfolder folder manually\nStatus: {}",
             cloudfolder.name,
             cloudfolder.folder_path.display(),
             cloudfolder_url,
             server_status,
-        )
+        );
+
+        // Add server start error if present
+        if let Some(ref error) = app.server_state.server_start_error {
+            info.push_str(&format!("\n\n{}", error));
+        }
+
+        info
     } else {
-        "No cloudfolders available".to_string()
+        let mut info = "No cloudfolders available".to_string();
+
+        // Add server start error if present
+        if let Some(ref error) = app.server_state.server_start_error {
+            info.push_str(&format!("\n\n{}", error));
+        }
+
+        info
     };
 
     // Add focus indicator to server info title
