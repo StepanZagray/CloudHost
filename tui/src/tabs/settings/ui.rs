@@ -117,7 +117,7 @@ fn render_password_section(app: &App, area: Rect, buf: &mut Buffer) {
 }
 
 fn render_config_folders_section(app: &mut App, area: Rect, buf: &mut Buffer) {
-    let config_folders = vec![
+    let config_folders = [
         ("📁 Server Config", ConfigFolder::ServerConfig),
         ("📁 TUI Config", ConfigFolder::TuiConfig),
     ];

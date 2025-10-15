@@ -3,8 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     widgets::{
-        Block, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
-        StatefulWidget, Widget,
+        Block, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, StatefulWidget, Widget,
     },
 };
 
@@ -44,7 +43,13 @@ pub fn render_server_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
         .collect();
 
     // Ensure we have a selection if none exists
-    if app.server_state.cloudfolders_list_state.selected().is_none() && !cloudfolder_items.is_empty() {
+    if app
+        .server_state
+        .cloudfolders_list_state
+        .selected()
+        .is_none()
+        && !cloudfolder_items.is_empty()
+    {
         app.server_state.cloudfolders_list_state.select(Some(0));
     }
 

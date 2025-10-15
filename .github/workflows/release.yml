@@ -42,7 +42,7 @@ jobs:
     
     - name: Build CloudHost (TUI)
       run: |
-        cargo build --release --target ${{ matrix.target }} -p cloudhost --verbose
+        cargo build --release --target ${{ matrix.target }} --bin cloudhost-tui --verbose
       env:
         CARGO_TERM_COLOR: always
         RUST_BACKTRACE: 1

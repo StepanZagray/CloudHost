@@ -656,7 +656,7 @@ pub async fn serve_static_file(
 
     headers.insert(
         header::CONTENT_TYPE,
-        header::HeaderValue::from_str(&mime_type)
+        header::HeaderValue::from_str(mime_type)
             .unwrap_or_else(|_| header::HeaderValue::from_static("application/octet-stream")),
     );
 

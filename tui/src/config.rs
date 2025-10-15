@@ -151,12 +151,12 @@ impl Config {
         match std::fs::read_to_string(&config_path) {
             Ok(config_str) => match toml::from_str::<Config>(&config_str) {
                 Ok(config) => Ok(config),
-                Err(e) => Err(TuiError::configuration(&format!(
+                Err(e) => Err(TuiError::configuration(format!(
                     "Failed to parse TUI config: {}",
                     e
                 ))),
             },
-            Err(_) => Err(TuiError::configuration(&format!(
+            Err(_) => Err(TuiError::configuration(format!(
                 "Could not find TUI config at: {:?}",
                 config_path
             ))),
@@ -178,14 +178,14 @@ impl Config {
 
         // Ensure the config directory exists
         config_paths::ensure_config_dir().map_err(|e| {
-            TuiError::configuration(&format!("Failed to create config directory: {}", e))
+            TuiError::configuration(format!("Failed to create config directory: {}", e))
         })?;
 
         let config_str = toml::to_string_pretty(self)
-            .map_err(|e| TuiError::configuration(&format!("Failed to serialize config: {}", e)))?;
+            .map_err(|e| TuiError::configuration(format!("Failed to serialize config: {}", e)))?;
 
         std::fs::write(&config_path, config_str)
-            .map_err(|e| TuiError::configuration(&format!("Failed to write config file: {}", e)))?;
+            .map_err(|e| TuiError::configuration(format!("Failed to write config file: {}", e)))?;
 
         Ok(())
     }

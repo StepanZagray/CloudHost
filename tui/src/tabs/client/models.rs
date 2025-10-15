@@ -23,5 +23,4 @@ impl TabFocus for ClientState {
         // Client navigation not implemented yet
         false
     }
-
 }

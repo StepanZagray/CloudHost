@@ -148,9 +148,7 @@ pub async fn get_cloudfolder_info(
     headers: HeaderMap,
 ) -> Result<Response, (StatusCode, axum::Json<serde_json::Value>)> {
     // Validate input
-    if let Err(error_response) = validate_cloudfolder_name(&cloudfolder_name) {
-        return Err(error_response);
-    }
+    validate_cloudfolder_name(&cloudfolder_name)?;
 
     // Check authentication
     let auth_state = get_authentication_state(&server_state);
@@ -252,9 +250,7 @@ pub async fn api_browse_file_or_directory(
     headers: HeaderMap,
 ) -> Result<Response, (StatusCode, axum::Json<serde_json::Value>)> {
     // Validate inputs
-    if let Err(error_response) = validate_cloudfolder_name(&cloudfolder_name) {
-        return Err(error_response);
-    }
+    validate_cloudfolder_name(&cloudfolder_name)?;
 
     // Check authentication
     let auth_state = get_authentication_state(&server_state);
