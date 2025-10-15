@@ -9,6 +9,14 @@ Currently features a terminal user interface (TUI) with more interfaces and feat
 ### Option 1: Pre-built binary (Recommended)
 Download the latest release from [GitHub Releases](https://github.com/StepanZagray/CloudHost/releases)
 
+#### Windows Defender Warning
+If Windows Defender shows a virus warning:
+1. Click "More info" 
+2. Click "Run anyway"
+3. Or add an exception in Windows Security
+
+This is a false positive. The source code is available for inspection.
+
 ### Option 2: Build from source
 ```bash
 git clone https://github.com/StepanZagray/CloudHost.git

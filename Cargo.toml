@@ -39,3 +39,6 @@ lto = true
 codegen-units = 1
 # Panic on abort instead of unwind (smaller binary)
 panic = "abort"
+# Additional optimizations for Windows
+[profile.release.package."*"]
+opt-level = "z"

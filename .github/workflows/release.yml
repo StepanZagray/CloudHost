@@ -83,14 +83,43 @@ jobs:
       run: |
         find artifacts -type f -exec ls -la {} \;
     
+    - name: Generate checksums
+      run: |
+        cd artifacts/cloudhost-linux
+        sha256sum cloudhost-tui > cloudhost-tui.sha256
+        cd ../cloudhost-windows
+        sha256sum cloudhost-tui.exe > cloudhost-tui.exe.sha256
+    
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         files: |
           artifacts/cloudhost-linux/cloudhost-tui
+          artifacts/cloudhost-linux/cloudhost-tui.sha256
           artifacts/cloudhost-windows/cloudhost-tui.exe
+          artifacts/cloudhost-windows/cloudhost-tui.exe.sha256
         generate_release_notes: true
         draft: false
         prerelease: false
+        body: |
+          ## Windows Defender Warning
+          
+          If Windows Defender shows a virus warning:
+          1. Click "More info" 
+          2. Click "Run anyway"
+          3. Or add an exception in Windows Security
+          
+          This is a false positive. The source code is available for inspection.
+          
+          ## Verification
+          
+          Verify the executable with the provided SHA256 checksums:
+          ```bash
+          # Linux
+          sha256sum -c cloudhost-tui.sha256
+          
+          # Windows (PowerShell)
+          Get-FileHash cloudhost-tui.exe -Algorithm SHA256
+          ```
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
