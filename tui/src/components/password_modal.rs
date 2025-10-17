@@ -68,9 +68,7 @@ pub fn render_password_modal(
 
     // Instructions
     let instructions = match password_state.get_password_mode() {
-        PasswordMode::Creating => {
-            "Enter new password (min 8 characters):"
-        }
+        PasswordMode::Creating => "Enter new password (min 8 characters):",
         PasswordMode::Confirming => "Confirm your password:",
     };
 

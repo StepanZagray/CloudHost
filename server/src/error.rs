@@ -57,9 +57,19 @@ impl IntoResponse for ServerError {
             }
             ServerError::Validation(msg) => (StatusCode::BAD_REQUEST, "VALIDATION_ERROR", msg),
             ServerError::CloudFolder(msg) => (StatusCode::NOT_FOUND, "CLOUD_FOLDER_ERROR", msg),
-            ServerError::ServerAlreadyRunning => (StatusCode::CONFLICT, "SERVER_RUNNING", "Server already running".to_string()),
-            ServerError::ServerNotRunning => (StatusCode::BAD_REQUEST, "SERVER_NOT_RUNNING", "Server not running".to_string()),
-            ServerError::ServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, "SERVER_ERROR", msg),
+            ServerError::ServerAlreadyRunning => (
+                StatusCode::CONFLICT,
+                "SERVER_RUNNING",
+                "Server already running".to_string(),
+            ),
+            ServerError::ServerNotRunning => (
+                StatusCode::BAD_REQUEST,
+                "SERVER_NOT_RUNNING",
+                "Server not running".to_string(),
+            ),
+            ServerError::ServerError(msg) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "SERVER_ERROR", msg)
+            }
             ServerError::InvalidPath(msg) => (StatusCode::BAD_REQUEST, "INVALID_PATH", msg),
         };
 
