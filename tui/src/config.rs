@@ -56,14 +56,14 @@ impl Default for Config {
         actions.insert(
             "Delete Folder".to_string(),
             Action {
-                keys: vec!["d".to_string()],
+                keys: vec!["d".to_string(), "x".to_string()],
                 tab: "folders".to_string(),
             },
         );
         actions.insert(
             "Delete Cloud".to_string(),
             Action {
-                keys: vec!["D".to_string()],
+                keys: vec!["D".to_string(), "X".to_string()],
                 tab: "folders".to_string(),
             },
         );
@@ -100,21 +100,21 @@ impl Default for Config {
         actions.insert(
             "Navigate Up".to_string(),
             Action {
-                keys: vec!["k".to_string()],
+                keys: vec!["k".to_string(), "<Up>".to_string()],
                 tab: "any".to_string(),
             },
         );
         actions.insert(
             "Navigate Down".to_string(),
             Action {
-                keys: vec!["j".to_string()],
+                keys: vec!["j".to_string(), "<Down>".to_string()],
                 tab: "any".to_string(),
             },
         );
         actions.insert(
             "Navigate to Top".to_string(),
             Action {
-                keys: vec!["g".to_string()],
+                keys: vec!["g".to_string(), "gg".to_string()],
                 tab: "any".to_string(),
             },
         );
@@ -148,6 +148,29 @@ impl Default for Config {
             Action {
                 keys: vec!["<leader>d".to_string()],
                 tab: "any".to_string(),
+            },
+        );
+
+        // Additional nvim-style keybinds
+        actions.insert(
+            "Toggle Selection".to_string(),
+            Action {
+                keys: vec!["<leader>".to_string(), " ".to_string()],
+                tab: "folders".to_string(),
+            },
+        );
+        actions.insert(
+            "Refresh/Reload".to_string(),
+            Action {
+                keys: vec!["r".to_string(), "<C-r>".to_string()],
+                tab: "any".to_string(),
+            },
+        );
+        actions.insert(
+            "Execute Action".to_string(),
+            Action {
+                keys: vec!["<Enter>".to_string()],
+                tab: "settings".to_string(),
             },
         );
 
@@ -231,5 +254,22 @@ impl Config {
             .get(action)
             .map(|action| action.keys.clone())
             .unwrap_or_default()
+    }
+
+    pub fn reset_to_default() -> TuiResult<()> {
+        let config_path = config_paths::get_tui_config_path();
+
+        // Remove the existing config file if it exists
+        if config_path.exists() {
+            std::fs::remove_file(&config_path).map_err(|e| {
+                TuiError::configuration(format!("Failed to remove config file: {}", e))
+            })?;
+        }
+
+        // Create and save the default config
+        let default_config = Self::default();
+        default_config.save_to_file()?;
+
+        Ok(())
     }
 }

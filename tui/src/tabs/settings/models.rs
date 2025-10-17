@@ -59,7 +59,7 @@ impl SettingsState {
         }
     }
 
-    fn handle_enter(&self) {
+    pub fn handle_enter(&self) {
         if let Some(selected) = self.list_state.selected() {
             match selected {
                 0 => {
@@ -69,28 +69,22 @@ impl SettingsState {
                         log::error!("Failed to open TUI config file: {}", e);
                     }
                 }
-                1 => {
+                3 => {
                     // Open clouds config file
                     let config_path = cloudhost_server::config_paths::get_clouds_config_path();
                     if let Err(e) = open::that(&config_path) {
                         log::error!("Failed to open clouds config file: {}", e);
                     }
                 }
-                2 => {
-                    // Open TUI config folder
-                    let config_path = cloudhost_server::config_paths::get_tui_config_path();
-                    if let Some(parent_dir) = config_path.parent() {
-                        if let Err(e) = open::that(parent_dir) {
-                            log::error!("Failed to open TUI config folder: {}", e);
+                6 => {
+                    // Reset TUI config to default
+                    match crate::config::Config::reset_to_default() {
+                        Ok(_) => {
+                            log::info!("TUI config reset to default successfully");
+                            // Note: The app will need to be restarted to see the changes
                         }
-                    }
-                }
-                3 => {
-                    // Open clouds config folder
-                    let config_path = cloudhost_server::config_paths::get_clouds_config_path();
-                    if let Some(parent_dir) = config_path.parent() {
-                        if let Err(e) = open::that(parent_dir) {
-                            log::error!("Failed to open clouds config folder: {}", e);
+                        Err(e) => {
+                            log::error!("Failed to reset TUI config to default: {}", e);
                         }
                     }
                 }

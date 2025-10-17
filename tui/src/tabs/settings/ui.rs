@@ -25,28 +25,9 @@ pub fn render_settings_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
         ListItem::new("☁️  Clouds Config File"),
         ListItem::new(format!("   {}", clouds_config_path.display())),
         ListItem::new(""),
-        ListItem::new("📁 TUI Config Folder"),
-        ListItem::new(format!(
-            "   {}",
-            tui_config_path
-                .parent()
-                .unwrap_or(&tui_config_path)
-                .display()
-        )),
-        ListItem::new(""),
-        ListItem::new("📁 Clouds Config Folder"),
-        ListItem::new(format!(
-            "   {}",
-            clouds_config_path
-                .parent()
-                .unwrap_or(&clouds_config_path)
-                .display()
-        )),
-        ListItem::new(""),
-        ListItem::new("💡 Instructions:"),
-        ListItem::new("   • Use j/k or ↑/↓ to navigate"),
-        ListItem::new("   • Press Enter to open files/folders"),
-        ListItem::new("   • Press q to quit"),
+        ListItem::new("🔄 Reset TUI Config to Default"),
+        ListItem::new("   ⚠️  This will delete your current keybinds and restore defaults"),
+        ListItem::new("   ℹ️  Restart the app to see the changes"),
     ];
 
     // Create the list

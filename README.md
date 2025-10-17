@@ -2,7 +2,7 @@
 
 A secure file server that helps users host their files locally with a modern web interface and REST API.
 
-Features a terminal user interface (TUI) for management and a web interface for file browsing with JWT-based authentication.
+Features a terminal user interface (TUI) with vim-like navigation for management and a web interface for file browsing with JWT-based authentication.
 
 ## Installation
 

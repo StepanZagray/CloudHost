@@ -1000,22 +1000,6 @@ impl App {
 
         // Handle leader key sequences first
         if key_str == self.config.leader {
-            // Special handling for folders tab - toggle selection of current folder
-            if current_tab == "folders"
-                && self.folders_state.focused_panel
-                    == crate::tabs::folders::models::FocusedPanel::Folders
-            {
-                if !self.folders_state.cloud_folders.is_empty() {
-                    self.folders_state
-                        .toggle_folder_selection(self.folders_state.selected_folder_index);
-                    self.add_debug(&format!(
-                        "Toggled selection for folder at index {}",
-                        self.folders_state.selected_folder_index
-                    ));
-                }
-                return;
-            }
-
             self.input_state =
                 InputState::KeySequence("<leader>".to_string(), std::time::Instant::now());
             self.add_debug(&format!("Leader key ('{}') pressed", key_str));
@@ -1167,6 +1151,32 @@ impl App {
             "Navigate to Bottom" => {
                 self.handle_tab_navigation(ratatui::crossterm::event::KeyCode::Char('G'));
             }
+            "Toggle Selection" => {
+                if self.selected_tab == SelectedTab::Folders
+                    && self.folders_state.focused_panel
+                        == crate::tabs::folders::models::FocusedPanel::Folders
+                    && !self.folders_state.cloud_folders.is_empty()
+                {
+                    self.folders_state
+                        .toggle_folder_selection(self.folders_state.selected_folder_index);
+                    self.add_debug(&format!(
+                        "Toggled selection for folder at index {}",
+                        self.folders_state.selected_folder_index
+                    ));
+                }
+            }
+            "Refresh/Reload" => {
+                // Reload data from orchestrator
+                self.load_folders_from_orchestrator();
+                self.add_debug("Refreshed data from orchestrator");
+            }
+            "Execute Action" => {
+                // Handle Enter key in settings tab
+                if self.selected_tab == SelectedTab::Settings {
+                    self.settings_state.handle_enter();
+                    self.add_debug("Executed settings action");
+                }
+            }
             _ => {
                 self.add_debug(&format!("Unknown action: {}", action));
             }
@@ -1307,25 +1317,9 @@ pub fn render_title(area: Rect, buf: &mut Buffer) {
 impl App {
     pub fn render_footer(&self, area: Rect, buf: &mut Buffer) {
         let footer_text = match self.selected_tab {
-            SelectedTab::Clouds => {
-                if self.clouds_state.clouds.is_empty() {
-                    "No clouds available. Create clouds in the Folders tab first. | s to start/stop server | q to quit"
-                } else {
-                    "j/k to navigate clouds | s to start/stop server | q to quit"
-                }
-            }
-            SelectedTab::Folders => match self.folders_state.focused_panel {
-                crate::tabs::folders::models::FocusedPanel::Clouds => {
-                    let selected_count = self.folders_state.get_selected_folders_count();
-                    if selected_count == 0 {
-                        "⚠️  No folders selected! Use <leader> to select folders, then 'n' to create cloud | q to quit"
-                    } else {
-                        "✅ Folders selected | 'n' to create cloud (then set password) | q to quit"
-                    }
-                }
-                _ => "j/k to navigate folders | Tab to switch panels | q to quit",
-            },
-            SelectedTab::Settings => "j/k to navigate | Enter to open files/folders | q to quit",
+            SelectedTab::Clouds => "j/k or ↑/↓ to navigate | s to start/stop server | gt/gT to switch tabs | q to quit",
+            SelectedTab::Folders => "j/k or ↑/↓ to navigate | Tab to switch panels | gt/gT to switch tabs | q to quit",
+            SelectedTab::Settings => "j/k or ↑/↓ to navigate | Enter to execute action | gt/gT to switch tabs | q to quit",
         };
         Line::raw(footer_text).centered().render(area, buf);
     }
