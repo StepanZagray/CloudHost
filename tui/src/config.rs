@@ -201,13 +201,23 @@ impl Config {
     }
 
     pub fn load_or_default() -> Self {
-        Self::load().unwrap_or_else(|_e| {
-            // TUI will handle its own config logging
-            let default_config = Self::default();
-            // Try to save the default config for future use
-            let _ = default_config.save_to_file();
-            default_config
-        })
+        match Self::load() {
+            Ok(mut config) => {
+                // Check if config is missing important keys and migrate if needed
+                if config.needs_migration() {
+                    config.migrate_to_latest();
+                    let _ = config.save_to_file(); // Save the migrated config
+                }
+                config
+            }
+            Err(_e) => {
+                // TUI will handle its own config logging
+                let default_config = Self::default();
+                // Try to save the default config for future use
+                let _ = default_config.save_to_file();
+                default_config
+            }
+        }
     }
 
     pub fn save_to_file(&self) -> TuiResult<()> {
@@ -271,5 +281,28 @@ impl Config {
         default_config.save_to_file()?;
 
         Ok(())
+    }
+
+    /// Check if the config needs migration (missing important keys)
+    fn needs_migration(&self) -> bool {
+        // Check if Execute Action for settings tab is missing
+        !self.actions.contains_key("Execute Action")
+            || !self.actions.get("Execute Action").is_some_and(|action| {
+                action.keys.contains(&"<Enter>".to_string()) && action.tab == "settings"
+            })
+    }
+
+    /// Migrate config to latest version by adding missing actions
+    fn migrate_to_latest(&mut self) {
+        // Add Execute Action for settings tab if missing
+        if !self.actions.contains_key("Execute Action") {
+            self.actions.insert(
+                "Execute Action".to_string(),
+                Action {
+                    keys: vec!["<Enter>".to_string()],
+                    tab: "settings".to_string(),
+                },
+            );
+        }
     }
 }
