@@ -1,24 +1,10 @@
-use axum::{
-    extract::State,
-    http::{HeaderMap, StatusCode},
-    response::Html,
-};
-use std::{collections::HashMap, sync::Arc};
+use axum::{extract::State, http::HeaderMap, response::Html};
+use std::sync::Arc;
 
-use crate::{auth::AuthState, cloud_folder::CloudFolder, server::ServerState};
-
-// Helper function to acquire lock on cloudfolders collection
-fn acquire_cloudfolders_lock(
-    server_state: &ServerState,
-) -> Result<std::sync::MutexGuard<'_, HashMap<String, CloudFolder>>, StatusCode> {
-    server_state
-        .cloudfolders
-        .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-}
+use crate::{auth::AuthState, cloud::CloudServerState};
 
 // Helper function to get authentication state from server state
-fn get_authentication_state(server_state: &ServerState) -> &Arc<AuthState> {
+fn get_authentication_state(server_state: &CloudServerState) -> &Arc<AuthState> {
     &server_state.auth_state
 }
 
@@ -40,9 +26,11 @@ fn has_valid_token(headers: &HeaderMap, auth_state: &AuthState) -> bool {
         if let Ok(cookie_str) = cookie_header.to_str() {
             for cookie in cookie_str.split(';') {
                 let cookie = cookie.trim();
-                if let Some(token) = cookie.strip_prefix("auth_token=") {
-                    if auth_state.verify_token(token).is_ok() {
-                        return true;
+                if cookie.starts_with("auth_token_") {
+                    if let Some(token) = cookie.split('=').nth(1) {
+                        if auth_state.verify_token(token).is_ok() {
+                            return true;
+                        }
                     }
                 }
             }
@@ -77,7 +65,7 @@ fn verify_authentication(headers: &HeaderMap, auth_state: &AuthState) -> Result<
 }
 
 pub async fn index(
-    State(server_state): State<ServerState>,
+    State(server_state): State<CloudServerState>,
     headers: HeaderMap,
 ) -> Result<Html<String>, Html<String>> {
     // Check authentication
@@ -87,41 +75,25 @@ pub async fn index(
         Err(redirect_html) => return Err(redirect_html),
     }
 
-    let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
-        Html(
-            r#"
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Server Error</title>
-</head>
-<body>
-    <h1>Server Error</h1>
-    <p>Failed to access cloud folders. Please try again later.</p>
-</body>
-</html>
-        "#
-            .to_string(),
-        )
-    })?;
-    let cloudfolder_list: Vec<&CloudFolder> = cloudfolders_guard.values().collect();
+    let cloud = &server_state.cloud;
 
-    let cloudfolders_html = if cloudfolder_list.is_empty() {
-        "<p>📭 No Cloud Folders available</p>".to_string()
+    let cloud_folders_html = if cloud.cloud_folders.is_empty() {
+        "<p>No cloud folders configured for this cloud.</p>".to_string()
     } else {
-        cloudfolder_list
+        cloud
+            .cloud_folders
             .iter()
-            .map(|cloudfolder| {
+            .map(|folder| {
                 format!(
-                    r#"<div class="cloudfolder-item">
-                        <h3>📁 <a href="/{}">{}</a></h3>
-                        <p><a href="/{}/files">Browse Files</a></p>
+                    r#"<div class="cloud-folder-item">
+                        <div class="cloud-folder-name">📁 {}</div>
+                        <a href="/web/{}/files" class="browse-btn">Browse Files</a>
                     </div>"#,
-                    cloudfolder.name, cloudfolder.name, cloudfolder.name
+                    folder.name, folder.name
                 )
             })
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("")
     };
 
     let html = format!(
@@ -135,16 +107,16 @@ pub async fn index(
             .container {{ max-width: 800px; margin: 0 auto; }}
             .header {{ text-align: center; margin-bottom: 30px; }}
             .status {{ background: #f0f0f0; padding: 20px; border-radius: 5px; margin-bottom: 20px; }}
-            .cloudfolders {{ background: #f9f9f9; padding: 20px; border-radius: 5px; }}
-            .cloudfolder-item {{ 
+            .cloud-folders {{ background: #f9f9f9; padding: 20px; border-radius: 5px; }}
+            .cloud-folder-item {{ 
                 background: white; 
                 padding: 15px; 
                 margin: 10px 0; 
                 border-radius: 5px; 
                 border-left: 4px solid #007bff;
             }}
-            .cloudfolder-item a {{ color: #007bff; text-decoration: none; }}
-            .cloudfolder-item a:hover {{ text-decoration: underline; }}
+            .cloud-folder-item a {{ color: #007bff; text-decoration: none; }}
+            .cloud-folder-item a:hover {{ text-decoration: underline; }}
         </style>
     </head>
     <body>
@@ -156,18 +128,17 @@ pub async fn index(
             <div class="status">
                 <h2>Server Status</h2>
                 <p>✅ Server is running</p>
-                <p>📊 {} Cloud Folders available</p>
+                <p>📊 Cloud: {}</p>
             </div>
-            <div class="cloudfolders">
-                <h2>📂 Available Cloud Folders</h2>
+            <div class="cloud-folders">
+                <h2>📂 Cloud Folders</h2>
                 {}
             </div>
         </div>
     </body>
     </html>
     "#,
-        cloudfolder_list.len(),
-        cloudfolders_html
+        cloud.name, cloud_folders_html
     );
 
     Ok(Html(html))

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 // Constants for config file names
 const APP_NAME: &str = "CloudHost";
-const SERVER_CONFIG_FILE: &str = "server-config.toml";
 const TUI_CONFIG_FILE: &str = "tui-config.toml";
+const CLOUDS_CONFIG_FILE: &str = "clouds-config.toml";
 
 /// Get the current directory with fallback
 fn get_current_dir() -> PathBuf {
@@ -68,17 +68,17 @@ fn get_appdata_dir() -> PathBuf {
     path
 }
 
-/// Get the full path to the server config file
-pub fn get_server_config_path() -> PathBuf {
-    let mut path = get_config_dir();
-    path.push(SERVER_CONFIG_FILE);
-    path
-}
-
 /// Get the full path to the TUI config file
 pub fn get_tui_config_path() -> PathBuf {
     let mut path = get_config_dir();
     path.push(TUI_CONFIG_FILE);
+    path
+}
+
+/// Get the full path to the clouds config file
+pub fn get_clouds_config_path() -> PathBuf {
+    let mut path = get_config_dir();
+    path.push(CLOUDS_CONFIG_FILE);
     path
 }
 

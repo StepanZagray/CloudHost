@@ -1,5 +1,5 @@
-pub mod cloudfolders;
+pub mod cloud;
 pub mod index;
 
-pub use cloudfolders::*;
+pub use cloud::*;
 pub use index::*;

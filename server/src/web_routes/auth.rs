@@ -135,7 +135,7 @@ pub async fn login_page() -> Html<String> {
                 if (response.ok) {
                     const data = await response.json();
                     // Store token in cookie
-                    document.cookie = `auth_token=${data.token}; path=/; max-age=86400`; // 24 hours
+                    document.cookie = `auth_token_${window.location.port}=${data.token}; path=/; max-age=86400`; // 24 hours
                     successDiv.textContent = 'Login successful! Redirecting...';
                     successDiv.style.display = 'block';
                     

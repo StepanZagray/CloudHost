@@ -4,9 +4,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde_json::json;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use crate::{auth::AuthState, cloud_folder::CloudFolder, server::ServerState};
+use crate::{auth::AuthState, cloud::CloudServerState};
 
 // Security headers for API responses
 fn add_security_headers(mut response: Response) -> Response {
@@ -36,18 +36,8 @@ fn add_security_headers(mut response: Response) -> Response {
     response
 }
 
-// Helper function to acquire lock on cloudfolders collection
-fn acquire_cloudfolders_lock(
-    server_state: &ServerState,
-) -> Result<std::sync::MutexGuard<'_, HashMap<String, CloudFolder>>, StatusCode> {
-    server_state
-        .cloudfolders
-        .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-}
-
 // Helper function to get authentication state from server state
-fn get_authentication_state(server_state: &ServerState) -> &Arc<AuthState> {
+fn get_authentication_state(server_state: &CloudServerState) -> &Arc<AuthState> {
     &server_state.auth_state
 }
 
@@ -69,9 +59,11 @@ fn has_valid_token(headers: &HeaderMap, auth_state: &AuthState) -> bool {
         if let Ok(cookie_str) = cookie_header.to_str() {
             for cookie in cookie_str.split(';') {
                 let cookie = cookie.trim();
-                if let Some(token) = cookie.strip_prefix("auth_token=") {
-                    if auth_state.verify_token(token).is_ok() {
-                        return true;
+                if cookie.starts_with("auth_token_") {
+                    if let Some(token) = cookie.split('=').nth(1) {
+                        if auth_state.verify_token(token).is_ok() {
+                            return true;
+                        }
                     }
                 }
             }
@@ -103,7 +95,7 @@ fn verify_authentication(
 
 // API endpoint for server status and cloudfolders list
 pub async fn api_index(
-    State(server_state): State<ServerState>,
+    State(server_state): State<CloudServerState>,
     headers: HeaderMap,
 ) -> Result<Response, (StatusCode, axum::Json<serde_json::Value>)> {
     // Check authentication
@@ -113,25 +105,24 @@ pub async fn api_index(
         Err(error_response) => return Err(error_response),
     }
 
-    let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            axum::Json(json!({
-                "error": "Internal Server Error",
-                "message": "Failed to access cloud folders"
-            })),
-        )
-    })?;
-    let cloudfolder_list: Vec<&CloudFolder> = cloudfolders_guard.values().collect();
+    let cloud = &server_state.cloud;
+
+    let cloud_folders = cloud
+        .cloud_folders
+        .iter()
+        .map(|folder| {
+            json!({
+                "name": folder.name
+            })
+        })
+        .collect::<Vec<_>>();
 
     let response = json!({
         "status": "running",
-        "cloudfolders": cloudfolder_list.len(),
-        "cloudfolder_list": cloudfolder_list.iter().map(|cf| json!({
-            "name": cf.name,
-            "id": cf.id,
-            "created_at": cf.created_at
-        })).collect::<Vec<_>>(),
+        "cloud": {
+            "name": cloud.name,
+            "cloud_folders": cloud_folders
+        },
         "timestamp": chrono::Utc::now()
     });
 

@@ -10,10 +10,10 @@ use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Display, EnumIter, FromRepr)]
 pub enum SelectedTab {
     #[default]
-    #[strum(to_string = "Server")]
-    Server,
-    #[strum(to_string = "Client")]
-    Client,
+    #[strum(to_string = "Clouds")]
+    Clouds,
+    #[strum(to_string = "Folders")]
+    Folders,
     #[strum(to_string = "Settings")]
     Settings,
 }
@@ -49,8 +49,8 @@ impl SelectedTab {
 
     pub const fn palette(self) -> tailwind::Palette {
         match self {
-            Self::Server => tailwind::BLUE,
-            Self::Client => tailwind::GREEN,
+            Self::Clouds => tailwind::BLUE,
+            Self::Folders => tailwind::GREEN,
             Self::Settings => tailwind::INDIGO,
         }
     }
@@ -73,8 +73,8 @@ impl SelectedTab {
         buf: &mut ratatui::buffer::Buffer,
     ) {
         match self {
-            Self::Server => crate::tabs::server::ui::render_server_tab(app, area, buf),
-            Self::Client => crate::tabs::client::ui::render_client_tab(app, area, buf),
+            Self::Clouds => crate::tabs::clouds::ui::render_servers_tab(app, area, buf),
+            Self::Folders => crate::tabs::folders::ui::render_folders_tab(app, area, buf),
             Self::Settings => crate::tabs::settings::ui::render_settings_tab(app, area, buf),
         }
     }

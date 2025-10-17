@@ -1,6 +1,6 @@
-pub mod client;
+pub mod clouds;
 pub mod focus;
-pub mod server;
+pub mod folders;
 pub mod settings;
 pub mod types;
 

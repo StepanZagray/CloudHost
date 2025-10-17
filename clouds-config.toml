@@ -1,0 +1,31 @@
+[[cloud_folders]]
+name = "wallpapers"
+folder_path = 'C:\Users\Stepan\Pictures\Wallpapers'
+
+[[cloud_folders]]
+name = "code"
+folder_path = 'C:\Users\Stepan\Code'
+
+[[clouds]]
+name = "cloud1"
+password_hash = "$2b$12$uc.UAoc1uY/gSyUDG5TrIeV5SvT28KGojva25R/nYgttoOTQCSOUG"
+password_changed_at = "2025-10-17T09:37:05.164004500Z"
+jwt_secret = "cloud-cloud1-secret-4ed078404a840369"
+
+[[clouds.cloud_folders]]
+name = "wallpapers"
+folder_path = 'C:\Users\Stepan\Pictures\Wallpapers'
+
+[[clouds.cloud_folders]]
+name = "code"
+folder_path = 'C:\Users\Stepan\Code'
+
+[[clouds]]
+name = "codecloud"
+password_hash = "$2b$12$2BjQRJQarDpuO.WFYZ1xYeqfTPvJgZxIQHfjeUWMOmtwwSPOEzYV."
+password_changed_at = "2025-10-17T09:37:26.859992900Z"
+jwt_secret = "cloud-codecloud-secret-cb236e3c4b2d2ef9"
+
+[[clouds.cloud_folders]]
+name = "code"
+folder_path = 'C:\Users\Stepan\Code'

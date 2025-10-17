@@ -4,9 +4,17 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde_json::json;
-use std::{collections::HashMap, fs, sync::Arc};
+use std::{fs, sync::Arc};
 
-use crate::{auth::AuthState, cloud_folder::CloudFolder, server::ServerState};
+use crate::{
+    auth::AuthState,
+    cloud::{Cloud, CloudServerState},
+};
+
+// Helper function to get authentication state from server state
+fn get_authentication_state(server_state: &CloudServerState) -> &Arc<AuthState> {
+    &server_state.auth_state
+}
 
 // Security headers for API responses
 fn add_security_headers(mut response: Response) -> Response {
@@ -36,8 +44,8 @@ fn add_security_headers(mut response: Response) -> Response {
     response
 }
 
-// Input validation for cloudfolder names
-fn validate_cloudfolder_name(
+// Input validation for cloud folder names
+fn validate_cloud_folder_name(
     name: &str,
 ) -> Result<(), (StatusCode, axum::Json<serde_json::Value>)> {
     // Check for empty or too long names
@@ -76,21 +84,6 @@ fn validate_cloudfolder_name(
     Ok(())
 }
 
-// Helper function to acquire lock on cloudfolders collection
-fn acquire_cloudfolders_lock(
-    server_state: &ServerState,
-) -> Result<std::sync::MutexGuard<'_, HashMap<String, CloudFolder>>, StatusCode> {
-    server_state
-        .cloudfolders
-        .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-}
-
-// Helper function to get authentication state from server state
-fn get_authentication_state(server_state: &ServerState) -> &Arc<AuthState> {
-    &server_state.auth_state
-}
-
 // Checks if request has valid authentication token
 fn has_valid_token(headers: &HeaderMap, auth_state: &AuthState) -> bool {
     // Check Authorization header
@@ -109,9 +102,11 @@ fn has_valid_token(headers: &HeaderMap, auth_state: &AuthState) -> bool {
         if let Ok(cookie_str) = cookie_header.to_str() {
             for cookie in cookie_str.split(';') {
                 let cookie = cookie.trim();
-                if let Some(token) = cookie.strip_prefix("auth_token=") {
-                    if auth_state.verify_token(token).is_ok() {
-                        return true;
+                if cookie.starts_with("auth_token_") {
+                    if let Some(token) = cookie.split('=').nth(1) {
+                        if auth_state.verify_token(token).is_ok() {
+                            return true;
+                        }
                     }
                 }
             }
@@ -142,13 +137,13 @@ fn verify_authentication(
 }
 
 // API endpoint for cloudfolder info
-pub async fn get_cloudfolder_info(
-    State(server_state): State<ServerState>,
-    Path(cloudfolder_name): Path<String>,
+pub async fn get_cloud_folder_info(
+    State(server_state): State<CloudServerState>,
+    Path(cloud_folder_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<Response, (StatusCode, axum::Json<serde_json::Value>)> {
     // Validate input
-    validate_cloudfolder_name(&cloudfolder_name)?;
+    validate_cloud_folder_name(&cloud_folder_name)?;
 
     // Check authentication
     let auth_state = get_authentication_state(&server_state);
@@ -157,28 +152,28 @@ pub async fn get_cloudfolder_info(
         Err(error_response) => return Err(error_response),
     }
 
-    let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            axum::Json(json!({
-                "error": "Internal Server Error",
-                "message": "Failed to access cloud folders"
-            })),
-        )
-    })?;
+    let cloud = &server_state.cloud;
 
-    let cloudfolder = cloudfolders_guard.get(&cloudfolder_name).ok_or((
-        StatusCode::NOT_FOUND,
-        axum::Json(json!({
-            "error": "Not Found",
-            "message": "Cloud folder not found"
-        })),
-    ))?;
+    // Find the specific cloud folder
+    let cloud_folder = cloud
+        .cloud_folders
+        .iter()
+        .find(|f| f.name == cloud_folder_name)
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            axum::Json(json!({
+                "error": "Not Found",
+                "message": "Cloud folder not found"
+            })),
+        ))?;
 
     let response = json!({
-        "name": cloudfolder.name,
-        "id": cloudfolder.id,
-        "created_at": cloudfolder.created_at
+        "cloud_name": cloud.name,
+        "cloud_folder": {
+            "name": cloud_folder.name,
+            "type": "cloud_folder"
+        },
+        "total_cloud_folders": cloud.cloud_folders.len()
     });
 
     let json_response = axum::Json(response);
@@ -198,12 +193,15 @@ pub async fn get_cloudfolder_info(
     Ok(add_security_headers(response))
 }
 
-// API endpoint for listing cloudfolder files
-pub async fn api_list_cloudfolder_files(
-    State(server_state): State<ServerState>,
-    Path(cloudfolder_name): Path<String>,
+// API endpoint for listing cloud folder files
+pub async fn api_list_cloud_folder_files(
+    State(server_state): State<CloudServerState>,
+    Path(cloud_folder_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<axum::Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    // Validate input
+    validate_cloud_folder_name(&cloud_folder_name)?;
+
     // Check authentication
     let auth_state = get_authentication_state(&server_state);
     match verify_authentication(&headers, auth_state) {
@@ -211,29 +209,9 @@ pub async fn api_list_cloudfolder_files(
         Err(error_response) => return Err(error_response),
     }
 
-    let cloudfolder = {
-        let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(json!({
-                    "error": "Internal Server Error",
-                    "message": "Failed to access cloud folders"
-                })),
-            )
-        })?;
-        cloudfolders_guard
-            .get(&cloudfolder_name)
-            .ok_or((
-                StatusCode::NOT_FOUND,
-                axum::Json(json!({
-                    "error": "Not Found",
-                    "message": "Cloud folder not found"
-                })),
-            ))?
-            .clone()
-    };
+    let cloud = &server_state.cloud;
 
-    browse_directory_internal(cloudfolder, "".to_string())
+    browse_directory_internal(cloud.as_ref().clone(), cloud_folder_name, "".to_string())
         .await
         .map_err(|e| {
             (
@@ -245,12 +223,12 @@ pub async fn api_list_cloudfolder_files(
 
 // API endpoint for browsing files/directories
 pub async fn api_browse_file_or_directory(
-    State(server_state): State<ServerState>,
-    Path((cloudfolder_name, path)): Path<(String, String)>,
+    State(server_state): State<CloudServerState>,
+    Path((cloud_folder_name, path)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Response, (StatusCode, axum::Json<serde_json::Value>)> {
     // Validate inputs
-    validate_cloudfolder_name(&cloudfolder_name)?;
+    validate_cloud_folder_name(&cloud_folder_name)?;
 
     // Check authentication
     let auth_state = get_authentication_state(&server_state);
@@ -259,29 +237,24 @@ pub async fn api_browse_file_or_directory(
         Err(error_response) => return Err(error_response),
     }
 
-    let cloudfolder = {
-        let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(json!({
-                    "error": "Internal Server Error",
-                    "message": "Failed to access cloud folders"
-                })),
-            )
-        })?;
-        cloudfolders_guard
-            .get(&cloudfolder_name)
-            .ok_or((
-                StatusCode::NOT_FOUND,
-                axum::Json(json!({
-                    "error": "Not Found",
-                    "message": "Cloud folder not found"
-                })),
-            ))?
-            .clone()
-    };
+    let cloud = &server_state.cloud;
 
-    let full_path = cloudfolder.folder_path.join(&path);
+    // Find the specific cloud folder
+    let base_path = cloud
+        .cloud_folders
+        .iter()
+        .find(|f| f.name == cloud_folder_name)
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            axum::Json(json!({
+                "error": "Not Found",
+                "message": "Cloud folder not found"
+            })),
+        ))?
+        .folder_path
+        .clone();
+
+    let full_path = base_path.join(&path);
 
     if !full_path.exists() {
         return Err((
@@ -295,16 +268,17 @@ pub async fn api_browse_file_or_directory(
 
     if full_path.is_dir() {
         // It's a directory, return directory listing as JSON
-        let json_response = browse_directory_internal(cloudfolder, path)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    axum::Json(
-                        json!({"error": "Directory browsing error", "message": e.to_string()}),
-                    ),
-                )
-            })?;
+        let json_response =
+            browse_directory_internal(cloud.as_ref().clone(), cloud_folder_name.clone(), path)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        axum::Json(
+                            json!({"error": "Directory browsing error", "message": e.to_string()}),
+                        ),
+                    )
+                })?;
 
         let response = axum::response::Response::builder()
             .header("Content-Type", "application/json")
@@ -335,7 +309,7 @@ pub async fn api_browse_file_or_directory(
             "name": file_name,
             "path": path,
             "size": size,
-            "download_url": format!("/api/{}/static/{}", cloudfolder_name, path)
+            "download_url": format!("/api/{}/static/{}", cloud_folder_name, path)
         });
 
         let json_response = axum::Json(response);
@@ -358,10 +332,20 @@ pub async fn api_browse_file_or_directory(
 
 // Internal function to browse directory and return JSON
 async fn browse_directory_internal(
-    cloudfolder: CloudFolder,
+    cloud: Cloud,
+    cloud_folder_name: String,
     requested_path: String,
 ) -> Result<axum::Json<serde_json::Value>, StatusCode> {
-    let base_path = &cloudfolder.folder_path;
+    // Find the specific cloud folder
+    let base_path = if let Some(cloud_folder) = cloud
+        .cloud_folders
+        .iter()
+        .find(|f| f.name == cloud_folder_name)
+    {
+        &cloud_folder.folder_path
+    } else {
+        return Err(StatusCode::NOT_FOUND);
+    };
     let full_path = base_path.join(&requested_path);
 
     // Security check: ensure the requested path is within the cloudfolder directory
@@ -388,7 +372,7 @@ async fn browse_directory_internal(
             "name": file_name,
             "path": requested_path,
             "size": size,
-            "download_url": format!("/api/{}/static/{}", cloudfolder.name, requested_path)
+            "download_url": format!("/api/{}/static/{}", cloud_folder_name, requested_path)
         });
 
         return Ok(axum::Json(response));

@@ -4,22 +4,15 @@ use axum::{
     response::{Html, Json, Response},
 };
 use serde_json::json;
-use std::{collections::HashMap, fs, sync::Arc};
+use std::{fs, sync::Arc};
 
-use crate::{auth::AuthState, cloud_folder::CloudFolder, server::ServerState};
-
-// Helper function to acquire lock on cloudfolders collection
-fn acquire_cloudfolders_lock(
-    server_state: &ServerState,
-) -> Result<std::sync::MutexGuard<'_, HashMap<String, CloudFolder>>, StatusCode> {
-    server_state
-        .cloudfolders
-        .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-}
+use crate::{
+    auth::AuthState,
+    cloud::{Cloud, CloudServerState},
+};
 
 // Helper function to get authentication state from server state
-fn get_authentication_state(server_state: &ServerState) -> &Arc<AuthState> {
+fn get_authentication_state(server_state: &CloudServerState) -> &Arc<AuthState> {
     &server_state.auth_state
 }
 
@@ -41,9 +34,11 @@ fn has_valid_token(headers: &HeaderMap, auth_state: &AuthState) -> bool {
         if let Ok(cookie_str) = cookie_header.to_str() {
             for cookie in cookie_str.split(';') {
                 let cookie = cookie.trim();
-                if let Some(token) = cookie.strip_prefix("auth_token=") {
-                    if auth_state.verify_token(token).is_ok() {
-                        return true;
+                if cookie.starts_with("auth_token_") {
+                    if let Some(token) = cookie.split('=').nth(1) {
+                        if auth_state.verify_token(token).is_ok() {
+                            return true;
+                        }
                     }
                 }
             }
@@ -77,9 +72,8 @@ fn verify_authentication(headers: &HeaderMap, auth_state: &AuthState) -> Result<
     Err(Html(redirect_html.to_string()))
 }
 
-pub async fn show_cloudfolder_info(
-    State(server_state): State<ServerState>,
-    Path(cloudfolder_name): Path<String>,
+pub async fn show_cloud_folder_info(
+    State(server_state): State<CloudServerState>,
     headers: HeaderMap,
 ) -> Result<Html<String>, Html<String>> {
     // Check authentication
@@ -89,42 +83,7 @@ pub async fn show_cloudfolder_info(
         Err(redirect_html) => return Err(redirect_html),
     }
 
-    let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
-        Html(
-            r#"
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Server Error</title>
-</head>
-<body>
-    <h1>Server Error</h1>
-    <p>Failed to access cloud folders. Please try again later.</p>
-</body>
-</html>
-        "#
-            .to_string(),
-        )
-    })?;
-
-    let cloudfolder = cloudfolders_guard.get(&cloudfolder_name).ok_or_else(|| {
-        Html(
-            r#"
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Not Found</title>
-</head>
-<body>
-    <h1>Cloud Folder Not Found</h1>
-    <p>The requested cloud folder was not found.</p>
-    <a href="/">Back to Home</a>
-</body>
-</html>
-        "#
-            .to_string(),
-        )
-    })?;
+    let cloud = &server_state.cloud;
 
     let html = format!(
         r#"
@@ -136,7 +95,7 @@ pub async fn show_cloudfolder_info(
             body {{ font-family: Arial, sans-serif; margin: 40px; }}
             .container {{ max-width: 800px; margin: 0 auto; }}
             .header {{ text-align: center; margin-bottom: 30px; }}
-            .cloudfolder-info {{ background: #f0f0f0; padding: 20px; border-radius: 5px; margin-bottom: 20px; }}
+            .cloud-folder-info {{ background: #f0f0f0; padding: 20px; border-radius: 5px; margin-bottom: 20px; }}
             .actions {{ background: #f9f9f9; padding: 20px; border-radius: 5px; }}
             .btn {{ 
                 display: inline-block; 
@@ -155,33 +114,33 @@ pub async fn show_cloudfolder_info(
             <div class="header">
                 <h1>🌩️ CloudTUI</h1>
             </div>
-            <div class="cloudfolder-info">
+            <div class="cloud-folder-info">
                 <h2>Cloud Folder Information</h2>
                 <p><strong>Name:</strong> {}</p>
-                <p><strong>Created:</strong> {}</p>
+                <p><strong>Folders:</strong> {}</p>
             </div>
             <div class="actions">
                 <h2>Actions</h2>
-                <a href="/{}/files" class="btn">📁 Browse Files</a>
+                <a href="/web/{}/files" class="btn">📁 Browse Files</a>
                 <a href="/" class="btn">🏠 Back to All Cloud Folders</a>
             </div>
         </div>
     </body>
     </html>
     "#,
-        cloudfolder.name,
-        cloudfolder.name,
-        cloudfolder.created_at.format("%Y-%m-%d %H:%M:%S"),
-        cloudfolder.name,
+        cloud.name,
+        cloud.name,
+        cloud.cloud_folders.len(),
+        cloud.name,
     );
 
     Ok(Html(html))
 }
 
 #[axum::debug_handler]
-pub async fn list_cloudfolder_files(
-    State(server_state): State<ServerState>,
-    Path(cloudfolder_name): Path<String>,
+pub async fn list_cloud_folder_files(
+    Path(cloud_folder_name): Path<String>,
+    State(server_state): State<CloudServerState>,
     headers: HeaderMap,
 ) -> Result<Html<String>, Html<String>> {
     // Check authentication
@@ -190,48 +149,9 @@ pub async fn list_cloudfolder_files(
         Ok(()) => (),
         Err(redirect_html) => return Err(redirect_html),
     }
-    let cloudfolder = {
-        let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
-            Html(
-                r#"
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Server Error</title>
-</head>
-<body>
-    <h1>Server Error</h1>
-    <p>Failed to access cloud folders. Please try again later.</p>
-</body>
-</html>
-            "#
-                .to_string(),
-            )
-        })?;
-        cloudfolders_guard
-            .get(&cloudfolder_name)
-            .ok_or_else(|| {
-                Html(
-                    r#"
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Not Found</title>
-</head>
-<body>
-    <h1>Cloud Folder Not Found</h1>
-    <p>The requested cloud folder was not found.</p>
-    <a href="/">Back to Home</a>
-</body>
-</html>
-                "#
-                    .to_string(),
-                )
-            })?
-            .clone()
-    };
+    let cloud = &server_state.cloud;
 
-    browse_directory_internal(cloudfolder, "".to_string())
+    browse_directory_internal(cloud.as_ref().clone(), cloud_folder_name, "".to_string())
         .await
         .map_err(|_| {
             Html(
@@ -254,13 +174,23 @@ pub async fn list_cloudfolder_files(
 }
 
 async fn browse_directory_internal(
-    cloudfolder: CloudFolder,
+    cloud: Cloud,
+    cloud_folder_name: String,
     requested_path: String,
 ) -> Result<Html<String>, StatusCode> {
-    let base_path = &cloudfolder.folder_path;
+    // Find the specific cloud folder
+    let base_path = if let Some(cloud_folder) = cloud
+        .cloud_folders
+        .iter()
+        .find(|cf| cf.name == cloud_folder_name)
+    {
+        &cloud_folder.folder_path
+    } else {
+        return Err(StatusCode::NOT_FOUND);
+    };
     let full_path = base_path.join(&requested_path);
 
-    // Security check: ensure the requested path is within the cloudfolder directory
+    // Security check: ensure the requested path is within the cloud folder directory
     if !full_path.starts_with(base_path) {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -271,7 +201,7 @@ async fn browse_directory_internal(
 
     // If it's a file, redirect to the static file service
     if full_path.is_file() {
-        let redirect_url = format!("/{}/static/{}", cloudfolder.name, requested_path);
+        let redirect_url = format!("/static/{}", requested_path);
         return Ok(Html(format!(
             r#"<html><head><meta http-equiv="refresh" content="0; url={}"></head><body>Redirecting to file...</body></html>"#,
             redirect_url
@@ -364,8 +294,8 @@ async fn browse_directory_internal(
             </div>
             
             <div class="breadcrumb">
-                <a href="/">🏠 All Cloud Folders</a> / <a href="/{}/files">📁 Root</a>
-                {}
+                <a href="/">🏠 Cloud Folders</a> / <a href="/web/{}/files">📁 Root</a>
+                /{}
             </div>
             
             <div class="file-list">
@@ -377,18 +307,18 @@ async fn browse_directory_internal(
     </html>
     "#,
         requested_path,
-        cloudfolder.name,
-        cloudfolder.name,
-        generate_breadcrumb(&requested_path, &cloudfolder.name),
-        generate_file_list(&items, &cloudfolder.name)
+        cloud.name,
+        cloud_folder_name,
+        generate_breadcrumb(&requested_path, &cloud_folder_name),
+        generate_file_list(&items, &cloud_folder_name)
     );
 
     Ok(Html(html))
 }
 
 pub async fn browse_file_or_directory(
-    State(server_state): State<ServerState>,
-    Path((cloudfolder_name, path)): Path<(String, String)>,
+    Path((cloud_folder_name, path)): Path<(String, String)>,
+    State(server_state): State<CloudServerState>,
     headers: HeaderMap,
 ) -> Result<Html<String>, Html<String>> {
     // Check authentication
@@ -397,29 +327,16 @@ pub async fn browse_file_or_directory(
         Ok(()) => (),
         Err(redirect_html) => return Err(redirect_html),
     }
-    let cloudfolder = {
-        let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
+    let cloud = &server_state.cloud;
+
+    // Find the specific cloud folder
+    let base_path = cloud
+        .cloud_folders
+        .iter()
+        .find(|cf| cf.name == cloud_folder_name)
+        .ok_or_else(|| {
             Html(
                 r#"
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Server Error</title>
-</head>
-<body>
-    <h1>Server Error</h1>
-    <p>Failed to access cloud folders. Please try again later.</p>
-</body>
-</html>
-            "#
-                .to_string(),
-            )
-        })?;
-        cloudfolders_guard
-            .get(&cloudfolder_name)
-            .ok_or_else(|| {
-                Html(
-                    r#"
 <!DOCTYPE html>
 <html>
 <head>
@@ -427,18 +344,19 @@ pub async fn browse_file_or_directory(
 </head>
 <body>
     <h1>Cloud Folder Not Found</h1>
-    <p>The requested cloud folder was not found.</p>
+    <p>Cloud folder '{}' not found.</p>
     <a href="/">Back to Home</a>
 </body>
 </html>
-                "#
-                    .to_string(),
-                )
-            })?
-            .clone()
-    };
+            "#
+                .replace("{}", &cloud_folder_name)
+                .to_string(),
+            )
+        })?
+        .folder_path
+        .clone();
 
-    let full_path = cloudfolder.folder_path.join(&path);
+    let full_path = base_path.join(&path);
 
     if !full_path.exists() {
         return Err(Html(
@@ -461,7 +379,7 @@ pub async fn browse_file_or_directory(
 
     if full_path.is_dir() {
         // It's a directory, show directory listing
-        browse_directory_internal(cloudfolder, path)
+        browse_directory_internal(cloud.as_ref().clone(), cloud_folder_name, path)
             .await
             .map_err(|_| {
                 Html(
@@ -514,21 +432,21 @@ pub async fn browse_file_or_directory(
                     <h1>📄 File: {}</h1>
                     <div class="file-info">
                         <p><strong>File:</strong> {}</p>
-                        <p><strong>Cloud Folder:</strong> {}</p>
-                        <a href="/{}/static/{}" class="download-btn">⬇️ Download File</a>
+                        <p><strong>Cloud:</strong> {}</p>
+                        <a href="/static/{}" class="download-btn">⬇️ Download File</a>
                     </div>
                 </div>
             </body>
             </html>
             "#,
-            file_name, file_name, cloudfolder_name, cloudfolder_name, path, cloudfolder_name
+            file_name, file_name, file_name, cloud.name, path
         );
 
         Ok(Html(html))
     }
 }
 
-fn generate_breadcrumb(path: &str, cloudfolder_name: &str) -> String {
+fn generate_breadcrumb(path: &str, cloud_folder_name: &str) -> String {
     if path.is_empty() {
         return String::new();
     }
@@ -545,15 +463,15 @@ fn generate_breadcrumb(path: &str, cloudfolder_name: &str) -> String {
             breadcrumb.push_str(" / ");
         }
         breadcrumb.push_str(&format!(
-            "<a href=\"/{}/files{}\">📁 {}</a>",
-            cloudfolder_name, current_path, part
+            "<a href=\"/web/{}/files{}\">📁 {}</a>",
+            cloud_folder_name, current_path, part
         ));
     }
 
     breadcrumb
 }
 
-fn generate_file_list(items: &[serde_json::Value], cloudfolder_name: &str) -> String {
+fn generate_file_list(items: &[serde_json::Value], cloud_folder_name: &str) -> String {
     if items.is_empty() {
         return "<p>📭 This directory is empty</p>".to_string();
     }
@@ -569,9 +487,9 @@ fn generate_file_list(items: &[serde_json::Value], cloudfolder_name: &str) -> St
         let class = if is_dir { "directory" } else { "" };
 
         let link_url = if is_dir {
-            format!("/{}/files/{}", cloudfolder_name, path)
+            format!("/web/{}/files/{}", cloud_folder_name, path)
         } else {
-            format!("/{}/static/{}", cloudfolder_name, path)
+            format!("/api/{}/static/{}", cloud_folder_name, path)
         };
 
         html.push_str(&format!(
@@ -588,8 +506,8 @@ fn generate_file_list(items: &[serde_json::Value], cloudfolder_name: &str) -> St
 }
 
 pub async fn serve_static_file(
-    State(server_state): State<ServerState>,
-    Path((cloudfolder_name, path)): Path<(String, String)>,
+    State(server_state): State<CloudServerState>,
+    Path((cloud_folder_name, path)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Response<axum::body::Body>, Json<serde_json::Value>> {
     // Check authentication for web routes (API routes can skip this)
@@ -601,28 +519,26 @@ pub async fn serve_static_file(
         })));
     }
 
-    let cloudfolder = {
-        let cloudfolders_guard = acquire_cloudfolders_lock(&server_state).map_err(|_| {
+    let cloud = &server_state.cloud;
+
+    // Find the specific cloud folder
+    let base_path = cloud
+        .cloud_folders
+        .iter()
+        .find(|f| f.name == cloud_folder_name)
+        .ok_or_else(|| {
             Json(json!({
-                "error": "Server Error",
-                "message": "Failed to access cloud folders. Please try again later."
+                "error": "Not Found",
+                "message": "Cloud folder not found."
             }))
-        })?;
-        cloudfolders_guard
-            .get(&cloudfolder_name)
-            .ok_or_else(|| {
-                Json(json!({
-                    "error": "Not Found",
-                    "message": "The requested cloud folder was not found."
-                }))
-            })?
-            .clone()
-    };
+        })?
+        .folder_path
+        .clone();
 
-    let full_path = cloudfolder.folder_path.join(&path);
+    let full_path = base_path.join(&path);
 
-    // Security check: ensure the requested path is within the cloudfolder directory
-    if !full_path.starts_with(&cloudfolder.folder_path) {
+    // Security check: ensure the requested path is within the cloud folder directory
+    if !full_path.starts_with(&base_path) {
         return Err(Json(json!({
             "error": "Forbidden",
             "message": "You don't have permission to access this file."

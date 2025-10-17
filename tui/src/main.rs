@@ -5,11 +5,12 @@ use ratatui::{
     DefaultTerminal,
 };
 
+mod components;
 mod config;
 mod error;
 mod models;
 mod tabs;
-use cloudhost_shared::debug_stream::init_debug_stream;
+mod utils;
 use error::TuiResult;
 use models::App;
 
@@ -56,39 +57,12 @@ async fn main() -> Result<()> {
     // tracing_subscriber::fmt::init();
 
     // Initialize debug stream for server-to-TUI communication
-    init_debug_stream(1000); // Keep last 1000 messages
 
     let terminal = ratatui::init();
-    let mut app = App::new();
+    let app = App::new();
 
-    // Subscribe to debug stream immediately after app creation
-    app.start_debug_stream_subscription().await;
-
-    // Log TUI config loading
-    let config = crate::config::Config::load();
-    if let Err(e) = config {
-        if let Some(debug_stream) = cloudhost_shared::debug_stream::get_debug_stream() {
-            debug_stream
-                .warn(
-                    "TUI",
-                    &format!(
-                        "Could not load tui-config.toml ({}), using default keybindings",
-                        e
-                    ),
-                )
-                .await;
-        }
-    }
-
-    // Test debug stream
-    if let Some(debug_stream) = cloudhost_shared::debug_stream::get_debug_stream() {
-        debug_stream
-            .info("TUI", "Debug stream initialized successfully")
-            .await;
-        debug_stream.info("TUI", "This is a test message").await;
-        debug_stream.warn("TUI", "This is a warning message").await;
-        debug_stream.error("TUI", "This is an error message").await;
-    }
+    // Load TUI config
+    let _config = crate::config::Config::load();
 
     let app_result = app.run(terminal).await;
     ratatui::restore();
@@ -105,7 +79,7 @@ impl App {
             self.check_timeouts().await;
 
             // Update server logs periodically
-            self.update_server_logs().await;
+            self.update_cloud_logs().await;
 
             self.handle_events().await?;
         }

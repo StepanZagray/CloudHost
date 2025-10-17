@@ -1,8 +1,8 @@
 # CloudHost
 
-A file server that helps users host their files locally. 
+A secure file server that helps users host their files locally with a modern web interface and REST API.
 
-Currently features a terminal user interface (TUI) with more interfaces and features planned for the future.
+Features a terminal user interface (TUI) for management and a web interface for file browsing with JWT-based authentication.
 
 ## Installation
 
@@ -22,16 +22,13 @@ This is a false positive. The source code is available for inspection.
 git clone https://github.com/StepanZagray/CloudHost.git
 cd CloudHost
 
-# Build TUI (terminal interface) - EASY WAY
-cargo tui
+# Build TUI (terminal interface) - Currently the only available UI
+cargo build --release -p cloudhost-tui
 ./target/release/cloudhost-tui
 
-# Alternative: Build specific package
-# cargo build --release -p cloudhost
-
 # Future UIs (when available)
-# cargo gui    # Desktop GUI
-# cargo web    # Web UI
+# cargo build --release -p cloudhost-gui    # Desktop GUI
+# cargo build --release -p cloudhost-web    # Web UI
 ```
 
 ### Option 3: Install via cargo
@@ -43,16 +40,24 @@ cloudhost-tui
 ## Setup
 
 ### Local
-1. Create cloud folders (virtual links to local directories)
-2. Set password in Settings tab
-3. Start server from Server tab
-4. Access via browser at the provided URL by server logs
+1. **Create Cloud Folders**: In the Folders tab, create folders that link to your local directories
+2. **Create Cloud**: Select the folders you want to include and create a cloud (group of folders that will be served together)
+3. **Set Password**: Set a secure password for your cloud
+4. **Start Server**: Go to the Clouds tab and start your cloud server
+5. **Access Files**: Use the provided URL to access your files via web browser
 
-### Internet
-1. complete first 3 steps from local
-2. Set up a cloudflare tunnel by doing steps from [docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-remote-tunnel/)
-3. If you do not want to use/buy domain, you can use cloudflare generic tunnel domain by opening terminal in admin mode and writing `cloudflared tunnel --url http://localhost:3000`
-4. Access via provided link by output of step 3
+### Web Interface
+- **Main Dashboard**: `http://localhost:PORT/` - Lists all cloud folders
+- **File Browser**: `http://localhost:PORT/web/{cloud_folder_name}/files` - Browse files in a specific cloud folder
+- **Login**: `http://localhost:PORT/login` - Secure login with your cloud password
+
+### Internet Access
+1. Complete the local setup steps above
+2. Download `cloudflared` from [Cloudflare](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+3. Set up a Cloudflare tunnel:
+   - Follow the [official documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-remote-tunnel/)
+   - Or use the generic tunnel domain: `cloudflared tunnel --url http://localhost:PORT`
+4. Access your files via the provided Cloudflare tunnel URL
 
 
 

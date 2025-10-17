@@ -8,9 +8,8 @@ use ratatui::{
 };
 use strum::IntoEnumIterator;
 
-use crate::tabs::{client, focus::TabFocus, server, settings, SelectedTab};
-use cloudhost_shared::config_paths;
-use cloudhost_shared::debug_stream::{get_debug_stream, DebugMessage};
+use crate::tabs::{clouds, focus::TabFocus, folders, settings, SelectedTab};
+use cloudhost_server::debug_stream::DebugMessage;
 
 // Timeout for key sequences (like Vim's timeoutlen)
 const KEY_SEQUENCE_TIMEOUT_MS: u64 = 1000; // 1 second
@@ -24,13 +23,16 @@ pub struct App {
     pub pending_number: Option<usize>,
     pub debug_mode: bool,
     pub debug_info: Vec<String>,
-    pub server_logs: Vec<DebugMessage>,
+    pub cloud_logs: Vec<DebugMessage>,
     pub debug_receiver:
-        Option<std::sync::Arc<std::sync::Mutex<Vec<cloudhost_shared::debug_stream::DebugMessage>>>>,
+        Option<std::sync::Arc<std::sync::Mutex<Vec<cloudhost_server::debug_stream::DebugMessage>>>>,
+
+    // Shared orchestrator instance - owns all cloud/folder/server management
+    pub orchestrator: cloudhost_server::Orchestrator,
 
     // Tab states
-    pub server_state: server::models::ServerState,
-    pub client_state: client::models::ClientState,
+    pub clouds_state: clouds::models::CloudsState,
+    pub folders_state: folders::models::FoldersState,
     pub settings_state: settings::models::SettingsState,
 }
 
@@ -54,47 +56,667 @@ impl App {
         let config = crate::config::Config::load_or_default();
 
         // Load server config
-        let server_config = Self::load_server_config();
 
-        // Create default server config file if it doesn't exist
-        Self::ensure_server_config_file();
-        Self {
-            config,
-            server_state: server::models::ServerState::new_with_config(&server_config),
-            client_state: client::models::ClientState::default(),
-            settings_state: settings::models::SettingsState::default(),
+        // Create orchestrator instance
+        let orchestrator = cloudhost_server::Orchestrator::new();
+
+        let mut app = Self {
+            config: config.clone(),
+            orchestrator,
+            clouds_state: clouds::models::CloudsState::new(),
+            folders_state: folders::models::FoldersState::default(),
+            settings_state: settings::models::SettingsState::new(),
             debug_receiver: None,
             ..Default::default()
+        };
+
+        // Load folders and clouds from orchestrator into the folders state
+        app.load_folders_from_orchestrator();
+
+        app
+    }
+
+    fn load_folders_from_orchestrator(&mut self) {
+        self.folders_state.cloud_folders = self.orchestrator.get_cloud_folders();
+        self.folders_state.clouds = self.orchestrator.get_clouds();
+        // Also update clouds state
+        self.clouds_state.clouds = self.orchestrator.get_clouds();
+    }
+
+    fn start_creating_folder(&mut self) {
+        if self.selected_tab == SelectedTab::Folders {
+            self.folders_state.creating_folder = true;
+            self.folders_state.new_folder_name.clear();
+            self.folders_state.new_folder_path.clear();
+            self.folders_state.folder_input_field = folders::models::FolderInputField::Name;
+            self.folders_state.folder_creation_error = None;
         }
     }
 
-    fn load_server_config() -> cloudhost_server::ServerConfig {
-        let config_path = config_paths::get_server_config_path();
-
-        match std::fs::read_to_string(&config_path) {
-            Ok(content) => {
-                toml::from_str::<cloudhost_server::ServerConfig>(&content).unwrap_or_default()
-            }
-            Err(_e) => {
-                // Server will handle its own logging - just use default config
-                cloudhost_server::ServerConfig::default()
+    fn start_creating_folder_or_cloud(&mut self) {
+        if self.selected_tab == SelectedTab::Folders {
+            match self.folders_state.focused_panel {
+                folders::models::FocusedPanel::Folders => {
+                    self.start_creating_folder();
+                }
+                folders::models::FocusedPanel::Clouds => {
+                    let selected_count = self.folders_state.get_selected_folders_count();
+                    if selected_count == 0 {
+                        self.folders_state.cloud_creation_error = Some(
+                            "❌ Cannot create cloud: No folders selected.\n💡 To create a cloud:\n   1. Focus on the Folders panel (use Tab or 'h')\n   2. Select folders using Space bar\n   3. Return to Clouds panel (use Tab or 'l')\n   4. Press 'n' to create a new cloud".to_string()
+                        );
+                        return;
+                    }
+                    self.folders_state.start_creating_cloud();
+                }
+                folders::models::FocusedPanel::Info => {
+                    // Info panel doesn't support creation
+                    self.add_debug(
+                        "Cannot create from info panel. Focus on folders or groups panel first.",
+                    );
+                }
             }
         }
     }
 
-    fn ensure_server_config_file() {
-        let config_path = config_paths::get_server_config_path();
+    fn delete_selected_folder(&mut self) {
+        if self.selected_tab == SelectedTab::Folders
+            && !self.folders_state.cloud_folders.is_empty()
+            && self.folders_state.selected_folder_index < self.folders_state.cloud_folders.len()
+        {
+            let folder_name = self.folders_state.cloud_folders
+                [self.folders_state.selected_folder_index]
+                .name
+                .clone();
 
-        // Ensure the config directory exists
-        let _ = config_paths::ensure_config_dir();
+            if let Err(e) = self.orchestrator.remove_cloud_folder(&folder_name) {
+                self.add_debug(&format!("Failed to remove folder: {}", e));
+                return;
+            }
 
-        // Create default config file if it doesn't exist
-        if !config_path.exists() {
-            let default_config = cloudhost_server::ServerConfig::default();
-            if let Ok(config_str) = toml::to_string_pretty(&default_config) {
-                let _ = std::fs::write(&config_path, config_str);
+            // Reload from orchestrator
+            self.load_folders_from_orchestrator();
+
+            // Adjust selected index if needed
+            if self.folders_state.selected_folder_index >= self.folders_state.cloud_folders.len()
+                && !self.folders_state.cloud_folders.is_empty()
+            {
+                self.folders_state.selected_folder_index =
+                    self.folders_state.cloud_folders.len() - 1;
+            }
+
+            self.add_debug(&format!("Deleted folder '{}'", folder_name));
+        }
+    }
+
+    fn delete_selected_cloud(&mut self) {
+        if self.selected_tab == SelectedTab::Folders
+            && !self.folders_state.clouds.is_empty()
+            && self.folders_state.selected_cloud_index < self.folders_state.clouds.len()
+        {
+            let cloud_name = self.folders_state.clouds[self.folders_state.selected_cloud_index]
+                .name
+                .clone();
+
+            if let Err(e) = self.orchestrator.remove_cloud(&cloud_name) {
+                self.add_debug(&format!("Failed to remove cloud: {}", e));
+                return;
+            }
+
+            // Reload from orchestrator
+            self.load_folders_from_orchestrator();
+
+            // Adjust selected index if needed
+            if self.folders_state.selected_cloud_index >= self.folders_state.clouds.len()
+                && !self.folders_state.clouds.is_empty()
+            {
+                self.folders_state.selected_cloud_index = self.folders_state.clouds.len() - 1;
+            }
+
+            self.add_debug(&format!("Deleted cloud '{}'", cloud_name));
+        }
+    }
+
+    fn start_setting_cloud_password(&mut self) {
+        if self.selected_tab == SelectedTab::Folders
+            && !self.folders_state.clouds.is_empty()
+            && self.folders_state.selected_cloud_index < self.folders_state.clouds.len()
+        {
+            self.folders_state
+                .password_creation
+                .start_creating_password();
+        }
+    }
+
+    fn select_all_folders(&mut self) {
+        if self.selected_tab == SelectedTab::Folders {
+            self.folders_state.select_all_folders();
+            let count = self.folders_state.get_selected_folders_count();
+            self.add_debug(&format!("Selected all {} folders", count));
+        }
+    }
+
+    fn start_editing(&mut self) {
+        if self.selected_tab == SelectedTab::Folders {
+            match self.folders_state.focused_panel {
+                folders::models::FocusedPanel::Folders => {
+                    if !self.folders_state.cloud_folders.is_empty() {
+                        self.folders_state.start_editing_folder();
+                    } else {
+                        self.add_debug("No folders to edit");
+                    }
+                }
+                folders::models::FocusedPanel::Clouds => {
+                    if !self.folders_state.clouds.is_empty() {
+                        self.folders_state.start_editing_cloud();
+                    } else {
+                        self.add_debug("No clouds to edit");
+                    }
+                }
+                folders::models::FocusedPanel::Info => {
+                    self.add_debug("Cannot edit from info panel");
+                }
             }
         }
+    }
+
+    fn complete_cloud_creation(&mut self) {
+        if self.selected_tab == SelectedTab::Folders && self.folders_state.creating_cloud {
+            let cloud_name = self.folders_state.new_cloud_name.trim().to_string();
+
+            if cloud_name.is_empty() {
+                self.folders_state.cloud_creation_error =
+                    Some("Cloud name cannot be empty".to_string());
+                return;
+            }
+
+            let selected_folder_names = self.folders_state.get_selected_folder_names();
+
+            if selected_folder_names.is_empty() {
+                self.folders_state.cloud_creation_error = Some("⚠️  No cloud folders selected! Please select at least one cloud folder using the <leader> key before creating a cloud.".to_string());
+                return;
+            }
+
+            // Build cloud from selected folders
+            let folders: Vec<cloudhost_server::CloudFolder> = selected_folder_names
+                .iter()
+                .filter_map(|name| {
+                    self.folders_state
+                        .cloud_folders
+                        .iter()
+                        .find(|f| &f.name == name)
+                        .map(|f| {
+                            cloudhost_server::CloudFolder::new(
+                                f.name.clone(),
+                                f.folder_path.clone(),
+                            )
+                        })
+                })
+                .collect();
+
+            if folders.is_empty() {
+                self.folders_state.cloud_creation_error =
+                    Some("No valid folders selected".to_string());
+                return;
+            }
+
+            let cloud = cloudhost_server::Cloud::new(cloud_name.clone(), folders);
+
+            if let Err(e) = self.orchestrator.add_cloud(cloud) {
+                self.folders_state.cloud_creation_error = Some(e.to_string());
+                return;
+            }
+
+            // Reload from orchestrator to update the cloud list
+            self.load_folders_from_orchestrator();
+
+            self.add_debug(&format!(
+                "Created cloud '{}' with {} folders",
+                cloud_name,
+                self.folders_state.get_selected_folders_count()
+            ));
+
+            // Clear folder selections after creating cloud
+            self.folders_state.clear_folder_selections();
+
+            // Start password creation for the new cloud using shared component
+            self.folders_state
+                .password_creation
+                .start_creating_password();
+        }
+    }
+
+    fn complete_cloud_password_creation(&mut self) {
+        if self.selected_tab == SelectedTab::Folders
+            && self
+                .folders_state
+                .password_creation
+                .is_password_creation_complete()
+        {
+            let password = self
+                .folders_state
+                .password_creation
+                .get_password()
+                .to_string();
+
+            // Determine if this is for a new cloud or existing cloud
+            let cloud_name = if !self.folders_state.new_cloud_name.is_empty() {
+                // New cloud creation
+                self.folders_state.new_cloud_name.trim().to_string()
+            } else if self.folders_state.selected_cloud_index < self.folders_state.clouds.len() {
+                // Existing cloud password setting
+                self.folders_state.clouds[self.folders_state.selected_cloud_index]
+                    .name
+                    .clone()
+            } else {
+                return; // No valid cloud
+            };
+
+            // Set the password for the cloud
+            if let Err(e) = self.orchestrator.set_cloud_password(&cloud_name, &password) {
+                self.folders_state.password_creation.password_error = Some(e.to_string());
+                return;
+            }
+
+            self.add_debug(&format!(
+                "Password set successfully for cloud '{}'",
+                cloud_name
+            ));
+
+            // Clear password creation state
+            self.folders_state
+                .password_creation
+                .clear_password_creation();
+
+            // If this was for a new cloud, clear cloud creation state completely
+            if !self.folders_state.new_cloud_name.is_empty() {
+                self.folders_state.clear_cloud_creation();
+            }
+        }
+    }
+
+    fn handle_folder_creation_input(&mut self, key: KeyCode) -> bool {
+        match key {
+            KeyCode::Esc => {
+                self.folders_state.creating_folder = false;
+                self.folders_state.folder_creation_error = None;
+                true
+            }
+            KeyCode::Enter => {
+                match self.folders_state.folder_input_field {
+                    folders::models::FolderInputField::Name => {
+                        if !self.folders_state.new_folder_name.is_empty() {
+                            self.folders_state.folder_input_field =
+                                folders::models::FolderInputField::Path;
+                        }
+                    }
+                    folders::models::FolderInputField::Path => {
+                        if !self.folders_state.new_folder_path.is_empty() {
+                            self.complete_folder_creation();
+                        }
+                    }
+                }
+                true
+            }
+            KeyCode::Tab => {
+                self.folders_state.folder_input_field = match self.folders_state.folder_input_field
+                {
+                    folders::models::FolderInputField::Name => {
+                        folders::models::FolderInputField::Path
+                    }
+                    folders::models::FolderInputField::Path => {
+                        folders::models::FolderInputField::Name
+                    }
+                };
+                true
+            }
+            KeyCode::Backspace => {
+                match self.folders_state.folder_input_field {
+                    folders::models::FolderInputField::Name => {
+                        self.folders_state.new_folder_name.pop();
+                    }
+                    folders::models::FolderInputField::Path => {
+                        self.folders_state.new_folder_path.pop();
+                    }
+                }
+                true
+            }
+            KeyCode::Char(c) => {
+                match self.folders_state.folder_input_field {
+                    folders::models::FolderInputField::Name => {
+                        self.folders_state.new_folder_name.push(c);
+                    }
+                    folders::models::FolderInputField::Path => {
+                        self.folders_state.new_folder_path.push(c);
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_cloud_creation_input(&mut self, key: KeyCode) -> bool {
+        // If we're in password creation mode, handle password input
+        if self.folders_state.password_creation.creating_password {
+            let char_key = match key {
+                KeyCode::Char(c) => c,
+                KeyCode::Enter => '\n',
+                KeyCode::Esc => '\x1b',
+                KeyCode::Backspace => '\x08',
+                _ => return false,
+            };
+            self.folders_state
+                .password_creation
+                .handle_password_input(char_key);
+
+            // Check if password creation is complete
+            if self
+                .folders_state
+                .password_creation
+                .is_password_creation_complete()
+            {
+                self.complete_cloud_password_creation();
+            }
+            return true;
+        }
+
+        // Handle normal cloud creation input
+        match key {
+            KeyCode::Esc => {
+                self.folders_state.clear_cloud_creation();
+                true
+            }
+            KeyCode::Enter => {
+                if !self.folders_state.new_cloud_name.is_empty() {
+                    self.complete_cloud_creation();
+                }
+                true
+            }
+            KeyCode::Backspace => {
+                self.folders_state.new_cloud_name.pop();
+                true
+            }
+            KeyCode::Char(c) => {
+                self.folders_state.new_cloud_name.push(c);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_password_creation_input(&mut self, key: KeyCode) -> bool {
+        let char_key = match key {
+            KeyCode::Char(c) => c,
+            KeyCode::Enter => '\n',
+            KeyCode::Esc => '\x1b',
+            KeyCode::Backspace => '\x08',
+            _ => return false,
+        };
+
+        self.folders_state
+            .password_creation
+            .handle_password_input(char_key);
+
+        // Check if password creation is complete
+        if self
+            .folders_state
+            .password_creation
+            .is_password_creation_complete()
+        {
+            self.complete_cloud_password_creation();
+        }
+
+        true
+    }
+
+    fn complete_folder_creation(&mut self) {
+        let folder_name = self.folders_state.new_folder_name.trim().to_string();
+        let folder_path = std::path::PathBuf::from(self.folders_state.new_folder_path.trim());
+
+        if folder_name.is_empty() {
+            self.folders_state.folder_creation_error =
+                Some("Folder name cannot be empty".to_string());
+            return;
+        }
+
+        // Validate folder path exists
+        if !folder_path.exists() {
+            self.folders_state.folder_creation_error =
+                Some(format!("Folder '{}' does not exist", folder_path.display()));
+            return;
+        }
+
+        if !folder_path.is_dir() {
+            self.folders_state.folder_creation_error =
+                Some(format!("'{}' is not a directory", folder_path.display()));
+            return;
+        }
+
+        let folder = cloudhost_server::CloudFolder::new(folder_name.clone(), folder_path.clone());
+
+        if let Err(e) = self.orchestrator.add_cloud_folder(folder) {
+            self.folders_state.folder_creation_error = Some(e.to_string());
+            return;
+        }
+
+        // Reload from orchestrator
+        self.load_folders_from_orchestrator();
+
+        self.add_debug(&format!(
+            "Created folder '{}' at path {}",
+            folder_name,
+            folder_path.display()
+        ));
+        self.folders_state.creating_folder = false;
+        self.folders_state.folder_creation_error = None;
+    }
+
+    fn handle_folder_edit_input(&mut self, key: KeyCode) -> bool {
+        match key {
+            KeyCode::Esc => {
+                self.folders_state.clear_folder_edit();
+                true
+            }
+            KeyCode::Enter => {
+                match self.folders_state.edit_folder_input_field {
+                    folders::models::FolderInputField::Name => {
+                        if !self.folders_state.edit_folder_name.is_empty() {
+                            self.folders_state.edit_folder_input_field =
+                                folders::models::FolderInputField::Path;
+                        }
+                    }
+                    folders::models::FolderInputField::Path => {
+                        if !self.folders_state.edit_folder_path.is_empty() {
+                            self.complete_folder_edit();
+                        }
+                    }
+                }
+                true
+            }
+            KeyCode::Tab => {
+                self.folders_state.edit_folder_input_field =
+                    match self.folders_state.edit_folder_input_field {
+                        folders::models::FolderInputField::Name => {
+                            folders::models::FolderInputField::Path
+                        }
+                        folders::models::FolderInputField::Path => {
+                            folders::models::FolderInputField::Name
+                        }
+                    };
+                true
+            }
+            KeyCode::Backspace => {
+                match self.folders_state.edit_folder_input_field {
+                    folders::models::FolderInputField::Name => {
+                        self.folders_state.edit_folder_name.pop();
+                    }
+                    folders::models::FolderInputField::Path => {
+                        self.folders_state.edit_folder_path.pop();
+                    }
+                }
+                true
+            }
+            KeyCode::Char(c) => {
+                match self.folders_state.edit_folder_input_field {
+                    folders::models::FolderInputField::Name => {
+                        self.folders_state.edit_folder_name.push(c);
+                    }
+                    folders::models::FolderInputField::Path => {
+                        self.folders_state.edit_folder_path.push(c);
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_cloud_edit_input(&mut self, key: KeyCode) -> bool {
+        match key {
+            KeyCode::Esc => {
+                self.folders_state.clear_cloud_edit();
+                true
+            }
+            KeyCode::Enter => {
+                if !self.folders_state.edit_cloud_name.is_empty() {
+                    self.complete_cloud_edit();
+                }
+                true
+            }
+            KeyCode::Backspace => {
+                self.folders_state.edit_cloud_name.pop();
+                true
+            }
+            KeyCode::Char(c) => {
+                if c == ' ' {
+                    // Leader key in cloud edit modal toggles folder selection
+                    if !self.folders_state.cloud_folders.is_empty() {
+                        let current_index = self.folders_state.selected_folder_index;
+                        self.folders_state
+                            .toggle_cloud_folder_selection(current_index);
+                    }
+                } else {
+                    self.folders_state.edit_cloud_name.push(c);
+                }
+                true
+            }
+            KeyCode::Up | KeyCode::Down => {
+                // Allow navigation in folder list within cloud edit modal
+                self.folders_state.handle_folders_navigation(key);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn complete_folder_edit(&mut self) {
+        let new_name = self.folders_state.edit_folder_name.trim().to_string();
+        let new_path = std::path::PathBuf::from(self.folders_state.edit_folder_path.trim());
+        let old_name = self.folders_state.edit_folder_original_name.clone();
+
+        if new_name.is_empty() {
+            self.folders_state.folder_edit_error = Some("Folder name cannot be empty".to_string());
+            return;
+        }
+
+        // Validate folder path exists
+        if !new_path.exists() {
+            self.folders_state.folder_edit_error =
+                Some(format!("Folder '{}' does not exist", new_path.display()));
+            return;
+        }
+
+        if !new_path.is_dir() {
+            self.folders_state.folder_edit_error =
+                Some(format!("'{}' is not a directory", new_path.display()));
+            return;
+        }
+
+        let new_folder = cloudhost_server::CloudFolder::new(new_name.clone(), new_path.clone());
+
+        if let Err(e) = self.orchestrator.update_cloud_folder(&old_name, new_folder) {
+            self.folders_state.folder_edit_error = Some(e.to_string());
+            return;
+        }
+
+        // Reload from orchestrator
+        self.load_folders_from_orchestrator();
+
+        self.add_debug(&format!("Updated folder '{}' to '{}'", old_name, new_name));
+        self.folders_state.clear_folder_edit();
+    }
+
+    fn complete_cloud_edit(&mut self) {
+        let new_name = self.folders_state.edit_cloud_name.trim().to_string();
+        let old_name = self.folders_state.edit_cloud_original_name.clone();
+
+        if new_name.is_empty() {
+            self.folders_state.cloud_edit_error = Some("Cloud name cannot be empty".to_string());
+            return;
+        }
+
+        let folder_names = self.folders_state.get_edit_cloud_selected_folder_names();
+
+        if folder_names.is_empty() {
+            self.folders_state.cloud_edit_error =
+                Some("Cloud must have at least one folder".to_string());
+            return;
+        }
+
+        // Build cloud from selected folders
+        let folders: Vec<cloudhost_server::CloudFolder> = folder_names
+            .iter()
+            .filter_map(|name| {
+                self.folders_state
+                    .cloud_folders
+                    .iter()
+                    .find(|f| &f.name == name)
+                    .map(|f| {
+                        cloudhost_server::CloudFolder::new(f.name.clone(), f.folder_path.clone())
+                    })
+            })
+            .collect();
+
+        if folders.is_empty() {
+            self.folders_state.cloud_edit_error = Some("No valid folders selected".to_string());
+            return;
+        }
+
+        // Get the old cloud to preserve password and JWT secret
+        let old_cloud = self.orchestrator.get_cloud(&old_name);
+
+        let new_cloud = if let Some(old_cloud_data) = old_cloud {
+            // Preserve password and JWT secret
+            cloudhost_server::Cloud {
+                name: new_name.clone(),
+                cloud_folders: folders,
+                password_hash: old_cloud_data.password_hash,
+                password_changed_at: old_cloud_data.password_changed_at,
+                jwt_secret: old_cloud_data.jwt_secret,
+            }
+        } else {
+            cloudhost_server::Cloud::new(new_name.clone(), folders)
+        };
+
+        if let Err(e) = self.orchestrator.update_cloud(&old_name, new_cloud) {
+            self.folders_state.cloud_edit_error = Some(e.to_string());
+            return;
+        }
+
+        // Check if the updated cloud has a password set
+        if !self.orchestrator.cloud_has_password(&new_name) {
+            self.folders_state.cloud_edit_error = Some(
+                "Cloud updated successfully, but no password is set. Please set a password before starting the cloud.".to_string()
+            );
+            return;
+        }
+
+        // Reload from orchestrator
+        self.load_folders_from_orchestrator();
+
+        self.add_debug(&format!("Updated cloud '{}' to '{}'", old_name, new_name));
+        self.folders_state.clear_cloud_edit();
     }
 
     pub fn next_tab(&mut self) {
@@ -150,127 +772,131 @@ impl App {
         }
     }
 
-    pub async fn start_debug_stream_subscription(&mut self) {
-        if let Some(debug_stream) = get_debug_stream() {
-            let mut receiver = debug_stream.subscribe();
+    pub async fn update_cloud_logs(&mut self) {
+        // Clear existing logs
+        self.cloud_logs.clear();
+        self.clouds_state.cloud_logs.clear();
 
-            // Get initial messages from history
-            let initial_messages = debug_stream.get_recent(50).await;
-            self.server_logs = initial_messages;
+        // Get the selected cloud name and fetch its logs
+        if !self.clouds_state.clouds.is_empty()
+            && self.clouds_state.selected_cloud_index < self.clouds_state.clouds.len()
+        {
+            let cloud_name = &self.clouds_state.clouds[self.clouds_state.selected_cloud_index].name;
 
-            // Spawn a task to listen for new debug messages
-            let server_logs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            let server_logs_clone = server_logs.clone();
+            // Get debug logs for the specific cloud
+            let messages = self.orchestrator.get_cloud_debug_logs(cloud_name).await;
 
-            tokio::spawn(async move {
-                while let Ok(message) = receiver.recv().await {
-                    if let Ok(mut logs) = server_logs_clone.lock() {
-                        logs.push(message);
-                        // Keep only last 100 messages
-                        if logs.len() > 100 {
-                            let excess = logs.len() - 100;
-                            logs.drain(0..excess);
-                        }
-                    }
-                }
-            });
-
-            // Store the receiver for later use
-            self.debug_receiver = Some(server_logs);
-        }
-    }
-
-    pub async fn update_server_logs(&mut self) {
-        if let Some(server_logs) = &self.debug_receiver {
-            if let Ok(logs) = server_logs.lock() {
-                self.server_logs = logs.clone();
-
-                // Also update the server state's logs for display
-                self.server_state.server_logs = logs
-                    .iter()
-                    .map(|msg| {
-                        format!(
-                            "[{}] [{}] {}: {}",
-                            msg.timestamp.format("%H:%M:%S"),
-                            msg.level,
-                            msg.source,
-                            msg.message
-                        )
-                    })
-                    .collect();
+            for message in messages {
+                self.cloud_logs.push(message.clone());
+                // Also add formatted string to clouds_state for display
+                let log_entry = format!(
+                    "[{}] [{}] {}: {}",
+                    message.timestamp.format("%H:%M:%S"),
+                    message.level,
+                    message.source,
+                    message.message
+                );
+                self.clouds_state.cloud_logs.push(log_entry);
             }
+        }
+
+        // Keep only last 100 logs
+        if self.cloud_logs.len() > 100 {
+            self.cloud_logs.truncate(100);
+        }
+        if self.clouds_state.cloud_logs.len() > 100 {
+            self.clouds_state.cloud_logs.truncate(100);
         }
     }
 
     // Tab-specific focus management
     pub fn cycle_focus_forward(&mut self) {
         match self.selected_tab {
-            SelectedTab::Server => self.server_state.cycle_focus_forward(),
-            SelectedTab::Client => self.client_state.cycle_focus_forward(),
+            SelectedTab::Clouds => self.clouds_state.cycle_focus_forward(),
+            SelectedTab::Folders => self.folders_state.cycle_focus_forward(),
             SelectedTab::Settings => self.settings_state.cycle_focus_forward(),
         }
     }
 
     pub fn cycle_focus_backward(&mut self) {
         match self.selected_tab {
-            SelectedTab::Server => self.server_state.cycle_focus_backward(),
-            SelectedTab::Client => self.client_state.cycle_focus_backward(),
+            SelectedTab::Clouds => self.clouds_state.cycle_focus_backward(),
+            SelectedTab::Folders => self.folders_state.cycle_focus_backward(),
             SelectedTab::Settings => self.settings_state.cycle_focus_backward(),
         }
     }
 
     pub fn get_current_focused_element(&self) -> String {
         match self.selected_tab {
-            SelectedTab::Server => self.server_state.get_focused_element(),
-            SelectedTab::Client => self.client_state.get_focused_element(),
+            SelectedTab::Clouds => self.clouds_state.get_focused_element(),
+            SelectedTab::Folders => self.folders_state.get_focused_element(),
             SelectedTab::Settings => self.settings_state.get_focused_element(),
         }
     }
 
     async fn complete_password_creation(&mut self) {
-        // Set the password
-        if let Some(ref mut server) = self.server_state.server {
-            if let Err(e) = server.set_password(&self.settings_state.password_input) {
-                self.settings_state.password_error = Some(format!("Failed to set password: {}", e));
-            } else {
-                self.settings_state.clear_password_creation_input();
-                self.settings_state.password_success = true;
-                // Clear any server start errors since password is now set
-                self.server_state.server_start_error = None;
-                self.add_debug("Password set successfully");
+        // Set the password for the selected cloud (from clouds tab)
+        if self.clouds_state.clouds.is_empty()
+            || self.clouds_state.selected_cloud_index >= self.clouds_state.clouds.len()
+        {
+            self.clouds_state.password_creation.password_error =
+                Some("No cloud selected".to_string());
+            return;
+        }
 
-                // If server is running, restart it to pick up the new AuthState
-                let was_running = self.server_state.is_server_running();
-                let port = self.server_state.server_port;
+        let cloud_name = self.clouds_state.clouds[self.clouds_state.selected_cloud_index]
+            .name
+            .clone();
 
-                if was_running {
-                    self.add_debug("Stopping server to apply password changes");
-                    self.server_state.stop_server().await;
-                }
+        let password = self
+            .clouds_state
+            .password_creation
+            .get_password()
+            .to_string();
 
-                // Recreate the server instance to pick up the new config
-                self.add_debug("Recreating server instance with new config");
-                self.server_state.server = Some(cloudhost_server::CloudServer::new());
-
-                // If server was running, restart it automatically
-                if was_running {
-                    if let Some(server_port) = port {
-                        self.add_debug(&format!("Restarting server on port {}", server_port));
-                        self.server_state.start_server();
-                        self.add_debug("Server restart initiated with new password");
-                    }
-                }
-            }
+        if let Err(e) = self
+            .clouds_state
+            .set_password(&mut self.orchestrator, &password)
+        {
+            self.clouds_state.password_creation.password_error = Some(e);
         } else {
-            self.settings_state.password_error = Some("Server not available".to_string());
+            self.clouds_state.clear_password_creation();
+            self.clouds_state.password_creation.password_success = true;
+            // Clear any server start errors since password is now set
+            self.clouds_state.cloud_start_error = None;
+            self.add_debug(&format!(
+                "Password set successfully for cloud '{}'",
+                cloud_name
+            ));
+
+            // If server is running, restart it to pick up the new AuthState
+            let was_running = self.clouds_state.running_clouds.contains_key(&cloud_name);
+
+            if was_running {
+                self.add_debug("Stopping server to apply password changes");
+                self.clouds_state.stop_server(&mut self.orchestrator).await;
+            }
+
+            // Recreate the orchestrator instance to pick up the new config
+            self.add_debug("Recreating orchestrator instance with new config");
+            // Orchestrator is already initialized in App
+            // Reload clouds from orchestrator
+            self.load_folders_from_orchestrator();
+
+            // If server was running, restart it automatically
+            if was_running {
+                self.add_debug("Restarting server with new password");
+                self.clouds_state.start_server(&mut self.orchestrator).await;
+                self.add_debug("Server restart initiated with new password");
+            }
         }
     }
 
     // Tab-specific navigation methods
     pub fn handle_tab_navigation(&mut self, key: ratatui::crossterm::event::KeyCode) -> bool {
         match self.selected_tab {
-            SelectedTab::Server => self.server_state.handle_navigation(key),
-            SelectedTab::Client => self.client_state.handle_navigation(key),
+            SelectedTab::Clouds => self.clouds_state.handle_navigation(key),
+            SelectedTab::Folders => self.folders_state.handle_navigation(key),
             SelectedTab::Settings => self.settings_state.handle_navigation(key),
         }
     }
@@ -306,39 +932,90 @@ impl App {
                     "<Tab>".to_string()
                 }
             }
+            KeyCode::BackTab => "<S-Tab>".to_string(),
             _ => return,
         };
 
         // Get current tab name
         let current_tab = match self.selected_tab {
-            SelectedTab::Server => "server",
-            SelectedTab::Client => "client",
+            SelectedTab::Clouds => "clouds",
+            SelectedTab::Folders => "folders",
             SelectedTab::Settings => "settings",
         };
 
         self.add_debug(&format!("Key: {} -> tab: {}", key_str, current_tab));
         self.add_debug(&format!("Input state: {:?}", self.input_state));
 
-        // Handle special cases first (cloudfolder creation)
-        if self.server_state.creating_cloudfolder {
-            self.server_state.handle_cloudfolder_input(key);
-            return;
-        }
+        // Handle special cases first (cloud management)
+        // Clouds are managed in the folders tab, not here
 
-        // Handle password creation modal
-        if self.settings_state.creating_password && self.settings_state.handle_password_input(key) {
+        // Handle password creation modal (now on clouds tab)
+        if self.clouds_state.password_creation.creating_password {
+            let char_key = match key {
+                KeyCode::Char(c) => c,
+                KeyCode::Enter => '\n',
+                KeyCode::Esc => '\x1b',
+                KeyCode::Backspace => '\x08',
+                _ => return,
+            };
+            self.clouds_state.handle_password_input(char_key);
             // If password creation is complete, handle it
-            if self.settings_state.password_mode
-                == crate::tabs::settings::models::PasswordMode::Confirming
-                && self.settings_state.password_input == self.settings_state.password_confirm
+            if self
+                .clouds_state
+                .password_creation
+                .is_password_creation_complete()
             {
                 self.complete_password_creation().await;
             }
             return;
         }
 
+        // Handle folder creation modal
+        if self.folders_state.creating_folder && self.handle_folder_creation_input(key) {
+            return;
+        }
+
+        // Handle cloud creation modal
+        if self.folders_state.creating_cloud && self.handle_cloud_creation_input(key) {
+            return;
+        }
+
+        // Handle password creation modal (for existing clouds)
+        if self.folders_state.password_creation.creating_password
+            && !self.folders_state.creating_cloud
+            && self.handle_password_creation_input(key)
+        {
+            return;
+        }
+
+        // Handle folder edit modal
+        if self.folders_state.editing_folder && self.handle_folder_edit_input(key) {
+            return;
+        }
+
+        // Handle cloud edit modal
+        if self.folders_state.editing_cloud && self.handle_cloud_edit_input(key) {
+            return;
+        }
+
         // Handle leader key sequences first
         if key_str == self.config.leader {
+            // Special handling for folders tab - toggle selection of current folder
+            if current_tab == "folders"
+                && self.folders_state.focused_panel
+                    == crate::tabs::folders::models::FocusedPanel::Folders
+            {
+                if !self.folders_state.cloud_folders.is_empty() {
+                    self.folders_state
+                        .toggle_folder_selection(self.folders_state.selected_folder_index);
+                    self.add_debug(&format!(
+                        "Toggled selection for folder at index {}",
+                        self.folders_state.selected_folder_index
+                    ));
+                }
+                return;
+            }
+
             self.input_state =
                 InputState::KeySequence("<leader>".to_string(), std::time::Instant::now());
             self.add_debug(&format!("Leader key ('{}') pressed", key_str));
@@ -429,16 +1106,53 @@ impl App {
             "Next Tab" => self.next_tab(),
             "Previous Tab" => self.previous_tab(),
             "Toggle Debug" => self.toggle_debug(),
-            "Start/Stop Server" => {
-                if self.server_state.is_server_running() {
-                    self.server_state.stop_server().await;
+            "Start/Stop Cloud" => {
+                if !self.clouds_state.clouds.is_empty()
+                    && self.clouds_state.selected_cloud_index < self.clouds_state.clouds.len()
+                    && self.clouds_state.is_cloud_running(
+                        &self.clouds_state.clouds[self.clouds_state.selected_cloud_index].name,
+                    )
+                {
+                    self.clouds_state.stop_server(&mut self.orchestrator).await;
                 } else {
-                    self.server_state.start_server();
+                    self.clouds_state.start_server(&mut self.orchestrator).await;
                 }
             }
-            "Create Cloud Folder" => self.server_state.start_creating_cloudfolder(),
-            "Delete cloud Folder" => self.server_state.delete_selected_cloudfolder(),
-            "Create Password" => self.settings_state.start_creating_password(),
+            "Create New" => {
+                self.start_creating_folder_or_cloud();
+            }
+            "Delete Folder" => {
+                self.delete_selected_folder();
+            }
+            "Delete Cloud" => {
+                self.delete_selected_cloud();
+            }
+            "Set Password" => {
+                self.start_setting_cloud_password();
+            }
+            "Select All Folders" => {
+                self.select_all_folders();
+            }
+            "Edit" => {
+                self.start_editing();
+            }
+            "Create Password" => {
+                // Password creation is now per-cloud on Clouds tab
+                if self.selected_tab == SelectedTab::Clouds {
+                    if !self.clouds_state.clouds.is_empty() {
+                        self.clouds_state.start_creating_password();
+                        let cloud_name =
+                            &self.clouds_state.clouds[self.clouds_state.selected_cloud_index].name;
+                        self.add_debug(&format!("Creating password for cloud '{}'", cloud_name));
+                    } else {
+                        self.add_debug(
+                            "No clouds available. Create a cloud first in the Folders tab.",
+                        );
+                    }
+                } else {
+                    self.add_debug("Password creation moved to Clouds tab. Switch to Clouds tab and press 'p'.");
+                }
+            }
             "Cycle Focus Forward" => self.cycle_focus_forward(),
             "Cycle Focus Backward" => self.cycle_focus_backward(),
             "Navigate Up" => {
@@ -466,8 +1180,8 @@ impl App {
                 // Timeout reached, execute the single key if it exists
                 if let Some(action) = self.config.get_action_for_key(seq) {
                     let current_tab = match self.selected_tab {
-                        SelectedTab::Server => "server",
-                        SelectedTab::Client => "client",
+                        SelectedTab::Clouds => "clouds",
+                        SelectedTab::Folders => "folders",
                         SelectedTab::Settings => "settings",
                     };
                     if self.config.is_key_valid_for_tab(seq, current_tab) {
@@ -543,7 +1257,7 @@ impl App {
         use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 
         // Create a scrollable area for server logs
-        let server_logs_area = Rect {
+        let cloud_logs_area = Rect {
             x: area.x,
             y: area.y,
             width: area.width,
@@ -577,12 +1291,12 @@ impl App {
         // Create scrollable list
         let list = List::new(all_items).block(Block::default().borders(Borders::ALL).title("Logs"));
 
-        ratatui::widgets::Widget::render(list, server_logs_area, buf);
+        ratatui::widgets::Widget::render(list, cloud_logs_area, buf);
     }
 }
 
 pub fn render_title(area: Rect, buf: &mut Buffer) {
-    let title = if cloudhost_shared::config_paths::is_dev_mode() {
+    let title = if cloudhost_server::config_paths::is_dev_mode() {
         "CloudHost (dev)"
     } else {
         "CloudHost"
@@ -592,26 +1306,26 @@ pub fn render_title(area: Rect, buf: &mut Buffer) {
 
 impl App {
     pub fn render_footer(&self, area: Rect, buf: &mut Buffer) {
-        let leader = &self.config.leader;
         let footer_text = match self.selected_tab {
-            SelectedTab::Server => {
-                if self.server_state.creating_cloudfolder {
-                    "Type cloudfolder name and folder path, press Tab to switch fields, Enter to confirm, Esc to cancel"
+            SelectedTab::Clouds => {
+                if self.clouds_state.clouds.is_empty() {
+                    "No clouds available. Create clouds in the Folders tab first. | s to start/stop server | q to quit"
                 } else {
-                    "j/k to navigate cloudfolders | s to start/stop server | n to create cloudfolder | d to delete cloudfolder | q to quit"
+                    "j/k to navigate clouds | s to start/stop server | q to quit"
                 }
             }
-            SelectedTab::Settings => {
-                if self.settings_state.creating_password {
-                    "Type password, press Enter to confirm, Esc to cancel"
-                } else {
-                    "p to create password | q to quit"
+            SelectedTab::Folders => match self.folders_state.focused_panel {
+                crate::tabs::folders::models::FocusedPanel::Clouds => {
+                    let selected_count = self.folders_state.get_selected_folders_count();
+                    if selected_count == 0 {
+                        "⚠️  No folders selected! Use <leader> to select folders, then 'n' to create cloud | q to quit"
+                    } else {
+                        "✅ Folders selected | 'n' to create cloud (then set password) | q to quit"
+                    }
                 }
-            }
-            _ => &format!(
-                "◄ ► to change tab | gt/gT for sequences | Press q to quit | {}+d for debug",
-                if leader == " " { "Space" } else { leader }
-            ),
+                _ => "j/k to navigate folders | Tab to switch panels | q to quit",
+            },
+            SelectedTab::Settings => "j/k to navigate | Enter to open files/folders | q to quit",
         };
         Line::raw(footer_text).centered().render(area, buf);
     }

@@ -16,6 +16,10 @@ pub enum ServerError {
     Internal(String),
     Validation(String),
     CloudFolder(String),
+    ServerAlreadyRunning,
+    ServerNotRunning,
+    ServerError(String),
+    InvalidPath(String),
 }
 
 impl fmt::Display for ServerError {
@@ -28,6 +32,10 @@ impl fmt::Display for ServerError {
             ServerError::Internal(msg) => write!(f, "Internal server error: {}", msg),
             ServerError::Validation(msg) => write!(f, "Validation error: {}", msg),
             ServerError::CloudFolder(msg) => write!(f, "Cloud folder error: {}", msg),
+            ServerError::ServerAlreadyRunning => write!(f, "Server already running"),
+            ServerError::ServerNotRunning => write!(f, "Server not running"),
+            ServerError::ServerError(msg) => write!(f, "Server error: {}", msg),
+            ServerError::InvalidPath(msg) => write!(f, "Invalid path: {}", msg),
         }
     }
 }
@@ -49,6 +57,10 @@ impl IntoResponse for ServerError {
             }
             ServerError::Validation(msg) => (StatusCode::BAD_REQUEST, "VALIDATION_ERROR", msg),
             ServerError::CloudFolder(msg) => (StatusCode::NOT_FOUND, "CLOUD_FOLDER_ERROR", msg),
+            ServerError::ServerAlreadyRunning => (StatusCode::CONFLICT, "SERVER_RUNNING", "Server already running".to_string()),
+            ServerError::ServerNotRunning => (StatusCode::BAD_REQUEST, "SERVER_NOT_RUNNING", "Server not running".to_string()),
+            ServerError::ServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, "SERVER_ERROR", msg),
+            ServerError::InvalidPath(msg) => (StatusCode::BAD_REQUEST, "INVALID_PATH", msg),
         };
 
         let body = Json(json!({

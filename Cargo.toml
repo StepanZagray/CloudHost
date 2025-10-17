@@ -1,8 +1,7 @@
 [workspace]
 members = [
     "tui",
-    "server", 
-    "shared"
+    "server"
     # Future UIs you could add:
     # "gui",      # Desktop GUI (GTK/Qt)
     # "web",       # Web UI (React/Vue)
@@ -18,7 +17,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 anyhow = "1.0"
 
 [workspace.package]
-version = "0.2.8"
+version = "0.3.0"
 edition = "2021"
 authors = ["Stepan Zagray"]
 description = "Personal Cloud Storage Server with UI"

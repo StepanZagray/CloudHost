@@ -1,5 +1,5 @@
 use crate::error::{TuiError, TuiResult};
-use cloudhost_shared::config_paths;
+use cloudhost_server::config_paths;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -40,45 +40,59 @@ impl Default for Config {
             },
         );
         actions.insert(
-            "Start/Stop Server".to_string(),
+            "Start/Stop Cloud".to_string(),
             Action {
                 keys: vec!["s".to_string()],
-                tab: "server".to_string(),
+                tab: "clouds".to_string(),
             },
         );
         actions.insert(
-            "Create Cloud Folder".to_string(),
+            "Create New".to_string(),
             Action {
                 keys: vec!["n".to_string()],
-                tab: "server".to_string(),
+                tab: "folders".to_string(),
             },
         );
         actions.insert(
-            "Delete cloud Folder".to_string(),
+            "Delete Folder".to_string(),
             Action {
                 keys: vec!["d".to_string()],
-                tab: "server".to_string(),
+                tab: "folders".to_string(),
             },
         );
         actions.insert(
-            "Previous Cloudfolder".to_string(),
+            "Delete Cloud".to_string(),
             Action {
-                keys: vec!["<Up>".to_string()],
-                tab: "server".to_string(),
+                keys: vec!["D".to_string()],
+                tab: "folders".to_string(),
             },
         );
         actions.insert(
-            "Next Cloudfolder".to_string(),
+            "Select All Folders".to_string(),
             Action {
-                keys: vec!["<Down>".to_string()],
-                tab: "server".to_string(),
+                keys: vec!["a".to_string()],
+                tab: "folders".to_string(),
+            },
+        );
+        actions.insert(
+            "Edit".to_string(),
+            Action {
+                keys: vec!["e".to_string()],
+                tab: "folders".to_string(),
             },
         );
         actions.insert(
             "Create Password".to_string(),
             Action {
                 keys: vec!["p".to_string()],
-                tab: "settings".to_string(),
+                tab: "clouds".to_string(),
+            },
+        );
+        actions.insert(
+            "Set Password".to_string(),
+            Action {
+                keys: vec!["p".to_string()],
+                tab: "folders".to_string(),
             },
         );
 
