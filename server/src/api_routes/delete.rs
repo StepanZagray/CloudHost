@@ -68,18 +68,16 @@ async fn move_to_trash(
     _cloud_folder: &crate::cloud::CloudFolder,
     _filename: &str,
 ) -> Result<(String, String, String), (StatusCode, Json<serde_json::Value>)> {
-    if cfg!(feature = "desktop") {
+    #[cfg(feature = "desktop")]
+    {
         // Desktop platforms (Windows, macOS, Linux) - use OS trash
-        #[cfg(feature = "desktop")]
-        {
-            if let Err(e) = trash::delete(file_path) {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": format!("Failed to move file to OS trash: {}", e)
-                    })),
-                ));
-            }
+        if let Err(e) = trash::delete(file_path) {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("Failed to move file to OS trash: {}", e)
+                })),
+            ));
         }
 
         Ok((
@@ -87,7 +85,10 @@ async fn move_to_trash(
             "File can be restored from OS trash/recycle bin".to_string(),
             "desktop".to_string(),
         ))
-    } else {
+    }
+
+    #[cfg(not(feature = "desktop"))]
+    {
         // Mobile platforms (Android, iOS) - permanently delete file
         if let Err(e) = tokio::fs::remove_file(file_path).await {
             return Err((
