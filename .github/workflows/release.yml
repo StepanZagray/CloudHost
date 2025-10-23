@@ -73,7 +73,14 @@ jobs:
           echo "LINKER: $CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"
         fi
         
-        cargo build --release --target ${{ matrix.target }} --verbose
+        # Build with appropriate features for each platform
+        if [ "${{ matrix.target }}" = "aarch64-linux-android" ]; then
+          echo "Building for mobile platform (Android)..."
+          cargo build --release --target ${{ matrix.target }} --no-default-features --features mobile --verbose
+        else
+          echo "Building for desktop platform..."
+          cargo build --release --target ${{ matrix.target }} --features desktop --verbose
+        fi
         
         # Verify the build was successful
         echo "Build completed. Checking output:"
@@ -89,7 +96,8 @@ jobs:
     - name: Build CloudHost TUI (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        cargo build --release --target ${{ matrix.target }} --verbose
+        echo "Building for Windows (desktop platform)..."
+        cargo build --release --target ${{ matrix.target }} --features desktop --verbose
         
         # Verify the build was successful
         echo "Build completed. Checking output:"
@@ -230,13 +238,15 @@ jobs:
           Get-FileHash cloudhost-tui.exe -Algorithm SHA256
           ```
           
-          ## Android/Termux Usage
+          ## Mobile/Android Usage
           
-          The Android build is compiled for ARM64 (aarch64) and should work on most modern Android devices with Termux:
+          The mobile build is compiled for ARM64 (aarch64) and should work on most modern Android devices with Termux:
           1. Install Termux from F-Droid or Google Play
           2. Download the `cloudhost-tui` binary for Android
           3. Make it executable: `chmod +x cloudhost-tui`
           4. Run: `./cloudhost-tui`
+          
+          **Note**: Mobile builds use permanent deletion (no trash functionality).
           
           ## Signature Verification (Windows)
           

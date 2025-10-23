@@ -65,7 +65,7 @@ async fn move_to_trash(
     _cloud_folder: &crate::cloud::CloudFolder,
     _filename: &str,
 ) -> Result<(String, String, String), (StatusCode, Json<serde_json::Value>)> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(feature = "desktop")]
     {
         // Desktop platforms (Windows, macOS, Linux) - use OS trash
         if let Err(e) = trash::delete(file_path) {
@@ -84,9 +84,9 @@ async fn move_to_trash(
         ))
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(feature = "mobile")]
     {
-        // Android - permanently delete file
+        // Mobile platforms (Android, iOS) - permanently delete file
         if let Err(e) = tokio::fs::remove_file(file_path).await {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -99,7 +99,7 @@ async fn move_to_trash(
         Ok((
             "File permanently deleted".to_string(),
             "File cannot be restored".to_string(),
-            "android".to_string(),
+            "mobile".to_string(),
         ))
     }
 }
