@@ -5,6 +5,9 @@ use axum::{
 };
 use serde_json::json;
 
+#[cfg(feature = "desktop")]
+use trash;
+
 use crate::cloud::CloudServerState;
 use crate::utils::{
     construct_file_path, find_cloud_folder, parse_target_path, validate_file_exists,
@@ -65,16 +68,18 @@ async fn move_to_trash(
     _cloud_folder: &crate::cloud::CloudFolder,
     _filename: &str,
 ) -> Result<(String, String, String), (StatusCode, Json<serde_json::Value>)> {
-    #[cfg(feature = "desktop")]
-    {
+    if cfg!(feature = "desktop") {
         // Desktop platforms (Windows, macOS, Linux) - use OS trash
-        if let Err(e) = trash::delete(file_path) {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": format!("Failed to move file to OS trash: {}", e)
-                })),
-            ));
+        #[cfg(feature = "desktop")]
+        {
+            if let Err(e) = trash::delete(file_path) {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": format!("Failed to move file to OS trash: {}", e)
+                    })),
+                ));
+            }
         }
 
         Ok((
@@ -82,10 +87,7 @@ async fn move_to_trash(
             "File can be restored from OS trash/recycle bin".to_string(),
             "desktop".to_string(),
         ))
-    }
-
-    #[cfg(feature = "mobile")]
-    {
+    } else {
         // Mobile platforms (Android, iOS) - permanently delete file
         if let Err(e) = tokio::fs::remove_file(file_path).await {
             return Err((
