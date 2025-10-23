@@ -35,10 +35,13 @@ jobs:
     
     - name: Setup Android NDK
       if: matrix.target == 'aarch64-linux-android'
-      uses: nttld/setup-ndk@v1
-      with:
-        ndk-version: 'r26b'
-        add-to-path: true
+      run: |
+        echo "Setting up Android NDK manually..."
+        wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+        unzip -q android-ndk-r25c-linux.zip
+        echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-r25c" >> $GITHUB_ENV
+        echo "$GITHUB_WORKSPACE/android-ndk-r25c" >> $GITHUB_PATH
+        echo "NDK setup complete"
     
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -53,6 +56,22 @@ jobs:
     
     - name: Build CloudHost TUI
       run: |
+        # Set up environment variables for Android build
+        if [ "${{ matrix.target }}" = "aarch64-linux-android" ]; then
+          echo "Setting up Android build environment..."
+          export CC_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          export CXX_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++"
+          export AR_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
+          
+          echo "Android environment variables:"
+          echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+          echo "CC: $CC_aarch64_linux_android"
+          echo "CXX: $CXX_aarch64_linux_android"
+          echo "AR: $AR_aarch64_linux_android"
+          echo "LINKER: $CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"
+        fi
+        
         cargo build --release --target ${{ matrix.target }} --verbose
         
         # Verify the build was successful
