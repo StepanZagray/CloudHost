@@ -25,7 +25,11 @@ mime_guess = "2.0"
 bcrypt = "0.15"
 jsonwebtoken = "9.0"
 toml = "0.8"
-trash = { version = "5.0", optional = true }
+# trash dependency is only included when desktop feature is enabled
+
+[dependencies.trash]
+version = "5.0"
+optional = true
 
 [features]
 default = ["desktop"]
