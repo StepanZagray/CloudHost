@@ -153,7 +153,7 @@ jobs:
         echo "Target directory: target/${{ matrix.target }}/release/"
         ls -la target/${{ matrix.target }}/release/ || echo "Target directory not found"
         mkdir -p release
-        cp target/${{ matrix.target }}/release/cloudhost-tui release/cloudhost-tui
+        cp target/${{ matrix.target }}/release/cloudhost-tui release/cloudhost-tui-android
         echo "Android artifact created:"
         ls -la release/
     
@@ -199,10 +199,10 @@ jobs:
           echo "Linux artifact not found, skipping checksum generation"
         fi
         
-        if [ -d "artifacts/cloudhost-android" ] && [ -f "artifacts/cloudhost-android/cloudhost-tui" ]; then
+        if [ -d "artifacts/cloudhost-android" ] && [ -f "artifacts/cloudhost-android/cloudhost-tui-android" ]; then
           echo "Generating checksum for Android artifact..."
           cd artifacts/cloudhost-android
-          sha256sum cloudhost-tui > cloudhost-tui.sha256
+          sha256sum cloudhost-tui-android > cloudhost-tui-android.sha256
           cd ../..
         else
           echo "Android artifact not found, skipping checksum generation"
@@ -223,8 +223,8 @@ jobs:
         files: |
           artifacts/cloudhost-linux/cloudhost-tui
           artifacts/cloudhost-linux/cloudhost-tui.sha256
-          artifacts/cloudhost-android/cloudhost-tui
-          artifacts/cloudhost-android/cloudhost-tui.sha256
+          artifacts/cloudhost-android/cloudhost-tui-android
+          artifacts/cloudhost-android/cloudhost-tui-android.sha256
           artifacts/cloudhost-windows/cloudhost-tui.exe
           artifacts/cloudhost-windows/cloudhost-tui.exe.sha256
         generate_release_notes: true
