@@ -69,7 +69,7 @@ impl Orchestrator {
         // Create AuthState for this cloud
         let auth_state = Arc::new(AuthState::new(
             cloud.jwt_secret.clone(),
-            cloud.password_hash.clone(),
+            cloud.password.clone(),
             cloud.password_changed_at,
         ));
 
@@ -268,5 +268,55 @@ impl Orchestrator {
         } else {
             Vec::new()
         }
+    }
+    // ========== Cloud config Management ==========
+
+    /// Reload the clouds config and restart affected clouds
+    pub async fn reload_config(&mut self) -> ServerResult<()> {
+        let running_clouds: Vec<String> = self.running_clouds.keys().cloned().collect();
+        self.clouds_config =
+            CloudsConfig::load_from_file().unwrap_or_else(|_e| CloudsConfig::default()); // Check which clouds are still valid after reload
+        let valid_clouds: std::collections::HashSet<String> = self
+            .clouds_config
+            .clouds
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+
+        // Stop clouds that are no longer in config
+        for cloud_name in &running_clouds {
+            if !valid_clouds.contains(cloud_name) {
+                if let Some(mut cloud_server) = self.running_clouds.remove(cloud_name) {
+                    if let Err(e) = cloud_server.stop_server().await {
+                        eprintln!(
+                            "Failed to stop cloud '{}' during config reload: {}",
+                            cloud_name, e
+                        );
+                    }
+                }
+            }
+        }
+
+        // Restart clouds that were running and are still valid
+        for cloud_name in &running_clouds {
+            if valid_clouds.contains(cloud_name) {
+                // Stop the existing server
+                if let Some(mut cloud_server) = self.running_clouds.remove(cloud_name) {
+                    if let Err(e) = cloud_server.stop_server().await {
+                        eprintln!("Failed to stop cloud '{}' for restart: {}", cloud_name, e);
+                    }
+                }
+
+                // Start the server with new config
+                if let Err(e) = self.start_cloud(cloud_name).await {
+                    eprintln!(
+                        "Failed to restart cloud '{}' after config reload: {}",
+                        cloud_name, e
+                    );
+                }
+            }
+        }
+
+        Ok(())
     }
 }

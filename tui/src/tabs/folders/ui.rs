@@ -223,11 +223,27 @@ fn render_info_panel(app: &App, area: Rect, buf: &mut Buffer) {
                 } else {
                     "Not selected"
                 };
+                // Get keybinds dynamically from config
+                let create_keys = app.config.get_keys_for_action("Create New").join(", ");
+                let delete_keys = app.config.get_keys_for_action("Delete Folder").join(", ");
+                let toggle_keys = app
+                    .config
+                    .get_keys_for_action("Toggle Selection")
+                    .join(", ");
+                let select_all_keys = app
+                    .config
+                    .get_keys_for_action("Select All Folders")
+                    .join(", ");
+
                 format!(
-                    "Cloud Folder: {}\nPath: {}\nStatus: {}\n\nPress 'n' to create cloud folder.\nPress 'd' to delete this cloud folder.\nPress <leader> to toggle selection.\nPress 'a' to select all cloud folders.",
+                    "Cloud Folder: {}\nPath: {}\nStatus: {}\n\nPress {} to create cloud folder.\nPress {} to delete this cloud folder.\nPress {} to toggle selection.\nPress {} to select all cloud folders.",
                     folder.name,
                     folder.folder_path.display(),
                     selection_status,
+                    create_keys,
+                    delete_keys,
+                    toggle_keys,
+                    select_all_keys,
                 )
             } else {
                 "No cloud folder selected.".to_string()
@@ -236,22 +252,55 @@ fn render_info_panel(app: &App, area: Rect, buf: &mut Buffer) {
         FocusedPanel::Clouds => {
             let selected_count = app.folders_state.get_selected_folders_count();
             if app.folders_state.clouds.is_empty() {
+                // Get keybinds dynamically from config
+                let toggle_keys = app.config.get_keys_for_action("Toggle Selection");
+                let create_keys = app.config.get_keys_for_action("Create New");
+
                 if selected_count == 0 {
-                    "⚠️  No cloud folders selected!\n\nTo create a cloud:\n1. Select cloud folders using <leader> key\n2. Press 'n' to create cloud\n\nCurrently selected: 0 folders".to_string()
+                    format!("⚠️  No cloud folders selected!\n\nTo create a cloud:\n1. Select cloud folders using {} key\n2. Press {} to create cloud\n\nCurrently selected: 0 folders", 
+                        toggle_keys.join(", "), create_keys.join(", "))
                 } else {
-                    format!("✅ {} cloud folder(s) selected.\n\nPress 'n' to create a cloud with selected folders.\nAfter creation, you'll set a password for security.\n\nSelected folders: {}", 
+                    format!("✅ {} cloud folder(s) selected.\n\nPress {} to create a cloud with selected folders.\nAfter creation, you'll set a password for security.\n\nSelected folders: {}", 
                         selected_count,
+                        create_keys.join(", "),
                         app.folders_state.get_selected_folder_names().join(", ")
                     )
                 }
             } else if app.folders_state.selected_cloud_index < app.folders_state.clouds.len() {
                 let cloud = &app.folders_state.clouds[app.folders_state.selected_cloud_index];
+                let password_display = if let Some(ref password) = cloud.password {
+                    app.folders_state.get_password_display(password)
+                } else {
+                    "No password set".to_string()
+                };
+                let password_status = if cloud.password.is_some() {
+                    ""
+                } else {
+                    "❌ Not set"
+                };
+                // Get keybinds dynamically from config
+                let create_keys = app.config.get_keys_for_action("Create New").join(", ");
+                let edit_keys = app.config.get_keys_for_action("Edit").join(", ");
+                let delete_keys = app.config.get_keys_for_action("Delete Cloud").join(", ");
+                let password_keys = app.config.get_keys_for_action("Set Password").join(", ");
+                let toggle_visibility_keys = app
+                    .config
+                    .get_keys_for_action("Toggle Password Visibility")
+                    .join(", ");
+
                 format!(
-                         "Cloud: {}\n\nPress 'n' to create new cloud.\nPress 'e' to edit this cloud.\nPress 'D' to delete this cloud.\nPress 'p' to set password for this cloud.\n\nCloud Folders: {}\n{}",
-                         cloud.name,
-                         cloud.cloud_folders.len(),
-                         cloud.cloud_folders.iter().map(|folder| folder.name.clone()).collect::<Vec<String>>().join("\n")
-                     )
+                    "Cloud: {}\nPassword: {}{}\n\nPress {} to create new cloud.\nPress {} to edit this cloud.\nPress {} to delete this cloud.\nPress {} to set password for this cloud.\nPress {} to toggle password visibility.\n\nCloud Folders ({}):\n{}",
+                    cloud.name,
+                    password_display,
+                    password_status,
+                    create_keys,
+                    edit_keys,
+                    delete_keys,
+                    password_keys,
+                    toggle_visibility_keys,
+                    cloud.cloud_folders.len(),
+                    cloud.cloud_folders.iter().map(|folder| format!("• {}", folder.name)).collect::<Vec<String>>().join("\n"),
+                )
             } else {
                 "No cloud selected.".to_string()
             }
@@ -603,19 +652,40 @@ fn render_cloud_edit_modal(app: &App, area: Rect, buf: &mut Buffer) {
         .render(modal_area, buf);
 
     // Instructions
-    Paragraph::new("Edit name, use <leader> to toggle cloud folders, Enter to save, Esc to cancel")
+    let instructions = match app.folders_state.cloud_edit_focus {
+        crate::tabs::folders::models::CloudEditFocus::Name => {
+            "📝 Editing name: Type to edit, Tab to switch to folders, Enter to save, Esc to cancel"
+                .to_string()
+        }
+        crate::tabs::folders::models::CloudEditFocus::Folders => {
+            // Get keybinds dynamically from config
+            let toggle_keys = app
+                .config
+                .get_keys_for_action("Toggle Selection")
+                .join(", ");
+            format!("📁 Navigating folders: j/k to navigate, {} to toggle, Tab to switch to name, Enter to save, Esc to cancel", toggle_keys)
+        }
+    };
+    Paragraph::new(instructions)
         .style(Style::default().fg(Color::Cyan))
         .alignment(Alignment::Center)
         .render(modal_chunks[1], buf);
 
     // Name field
     let name_text = format!("Name: {}", app.folders_state.edit_cloud_name);
+    let name_style = if app.folders_state.cloud_edit_focus
+        == crate::tabs::folders::models::CloudEditFocus::Name
+    {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    } else {
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
+    };
     Paragraph::new(name_text)
-        .style(
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        )
+        .style(name_style)
         .alignment(Alignment::Left)
         .render(modal_chunks[2], buf);
 
@@ -625,7 +695,17 @@ fn render_cloud_edit_modal(app: &App, area: Rect, buf: &mut Buffer) {
     let folders_block = Block::default()
         .borders(Borders::ALL)
         .title(format!("Folders ({} selected)", selected_count))
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(
+            if app.folders_state.cloud_edit_focus
+                == crate::tabs::folders::models::CloudEditFocus::Folders
+            {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Cyan)
+            },
+        );
 
     let folder_items: Vec<ListItem> = app
         .folders_state

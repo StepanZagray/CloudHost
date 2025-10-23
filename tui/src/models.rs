@@ -188,6 +188,22 @@ impl App {
         }
     }
 
+    fn toggle_cloud_password_display(&mut self) {
+        if self.selected_tab == SelectedTab::Folders
+            && self.folders_state.focused_panel
+                == crate::tabs::folders::models::FocusedPanel::Clouds
+            && !self.folders_state.clouds.is_empty()
+            && self.folders_state.selected_cloud_index < self.folders_state.clouds.len()
+        {
+            self.folders_state.toggle_password_display();
+            let new_state = match self.folders_state.password_display_state {
+                crate::tabs::folders::models::PasswordDisplayState::Hidden => "hidden",
+                crate::tabs::folders::models::PasswordDisplayState::Visible => "visible",
+            };
+            self.add_debug(&format!("Password display toggled to: {}", new_state));
+        }
+    }
+
     fn select_all_folders(&mut self) {
         if self.selected_tab == SelectedTab::Folders {
             self.folders_state.select_all_folders();
@@ -219,7 +235,6 @@ impl App {
             }
         }
     }
-
     fn complete_cloud_creation(&mut self) {
         if self.selected_tab == SelectedTab::Folders && self.folders_state.creating_cloud {
             let cloud_name = self.folders_state.new_cloud_name.trim().to_string();
@@ -584,27 +599,70 @@ impl App {
                 }
                 true
             }
-            KeyCode::Backspace => {
-                self.folders_state.edit_cloud_name.pop();
+            KeyCode::Tab => {
+                // Toggle between name editing and folder navigation
+                self.folders_state.cloud_edit_focus = match self.folders_state.cloud_edit_focus {
+                    crate::tabs::folders::models::CloudEditFocus::Name => {
+                        crate::tabs::folders::models::CloudEditFocus::Folders
+                    }
+                    crate::tabs::folders::models::CloudEditFocus::Folders => {
+                        crate::tabs::folders::models::CloudEditFocus::Name
+                    }
+                };
                 true
             }
-            KeyCode::Char(c) => {
-                if c == ' ' {
-                    // Leader key in cloud edit modal toggles folder selection
-                    if !self.folders_state.cloud_folders.is_empty() {
-                        let current_index = self.folders_state.selected_folder_index;
-                        self.folders_state
-                            .toggle_cloud_folder_selection(current_index);
-                    }
-                } else {
-                    self.folders_state.edit_cloud_name.push(c);
+            KeyCode::Backspace => {
+                if self.folders_state.cloud_edit_focus
+                    == crate::tabs::folders::models::CloudEditFocus::Name
+                {
+                    self.folders_state.edit_cloud_name.pop();
                 }
                 true
             }
+            KeyCode::Char(c) => {
+                match self.folders_state.cloud_edit_focus {
+                    crate::tabs::folders::models::CloudEditFocus::Name => {
+                        if c.to_string() == self.config.leader {
+                            // Leader key in cloud edit modal toggles folder selection
+                            if !self.folders_state.cloud_folders.is_empty() {
+                                let current_index = self.folders_state.selected_folder_index;
+                                self.folders_state
+                                    .toggle_cloud_folder_selection(current_index);
+                            }
+                        } else {
+                            self.folders_state.edit_cloud_name.push(c);
+                        }
+                        true
+                    }
+                    crate::tabs::folders::models::CloudEditFocus::Folders => {
+                        if c.to_string() == self.config.leader {
+                            // Leader key toggles folder selection
+                            if !self.folders_state.cloud_folders.is_empty() {
+                                let current_index = self.folders_state.selected_folder_index;
+                                self.folders_state
+                                    .toggle_cloud_folder_selection(current_index);
+                            }
+                            true
+                        } else if c == 'j' || c == 'k' {
+                            // Handle j/k navigation
+                            self.folders_state.handle_folders_navigation(key);
+                            true
+                        } else {
+                            false // Let other keys be handled by navigation
+                        }
+                    }
+                }
+            }
             KeyCode::Up | KeyCode::Down => {
-                // Allow navigation in folder list within cloud edit modal
-                self.folders_state.handle_folders_navigation(key);
-                true
+                if self.folders_state.cloud_edit_focus
+                    == crate::tabs::folders::models::CloudEditFocus::Folders
+                {
+                    // Allow navigation in folder list within cloud edit modal
+                    self.folders_state.handle_folders_navigation(key);
+                    true
+                } else {
+                    false
+                }
             }
             _ => false,
         }
@@ -691,7 +749,7 @@ impl App {
             cloudhost_server::Cloud {
                 name: new_name.clone(),
                 cloud_folders: folders,
-                password_hash: old_cloud_data.password_hash,
+                password: old_cloud_data.password,
                 password_changed_at: old_cloud_data.password_changed_at,
                 jwt_secret: old_cloud_data.jwt_secret,
             }
@@ -899,6 +957,22 @@ impl App {
             SelectedTab::Folders => self.folders_state.handle_navigation(key),
             SelectedTab::Settings => self.settings_state.handle_navigation(key),
         }
+    }
+
+    pub fn reload_tui_config(&mut self) {
+        self.config = crate::config::Config::load().unwrap();
+    }
+    pub async fn reload_clouds_config(&mut self) {
+        if let Err(e) = self.orchestrator.reload_config().await {
+            self.add_debug(&format!("Failed to reload clouds config: {}", e));
+        } else {
+            // Reload data from orchestrator to reflect changes
+            self.load_folders_from_orchestrator();
+        }
+    }
+    pub async fn reload_all_configs(&mut self) {
+        self.reload_tui_config();
+        self.reload_clouds_config().await;
     }
 
     pub async fn handle_dynamic_key(
@@ -1120,8 +1194,10 @@ impl App {
             "Edit" => {
                 self.start_editing();
             }
+            "Toggle Password Visibility" => {
+                self.toggle_cloud_password_display();
+            }
             "Create Password" => {
-                // Password creation is now per-cloud on Clouds tab
                 if self.selected_tab == SelectedTab::Clouds {
                     if !self.clouds_state.clouds.is_empty() {
                         self.clouds_state.start_creating_password();
@@ -1169,6 +1245,18 @@ impl App {
                 // Reload data from orchestrator
                 self.load_folders_from_orchestrator();
                 self.add_debug("Refreshed data from orchestrator");
+            }
+            "Reload TUI Config" => {
+                self.reload_tui_config();
+                self.add_debug("TUI config reloaded successfully");
+            }
+            "Reload Clouds Config" => {
+                self.reload_clouds_config().await;
+                self.add_debug("Clouds config reloaded successfully");
+            }
+            "Reload All Configs" => {
+                self.reload_all_configs().await;
+                self.add_debug("All configs reloaded successfully");
             }
             "Execute Action" => {
                 // Handle Enter key in settings tab

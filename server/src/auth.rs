@@ -17,27 +17,27 @@ pub struct Claims {
 
 pub struct AuthState {
     pub secret: String,
-    pub password_hash: std::sync::Mutex<Option<String>>,
+    pub password: std::sync::Mutex<Option<String>>,
     pub password_changed_at: std::sync::Mutex<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
 impl AuthState {
     pub fn new(
         secret: String,
-        password_hash: Option<String>,
+        password: Option<String>,
         password_changed_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Self {
         Self {
             secret,
-            password_hash: std::sync::Mutex::new(password_hash),
+            password: std::sync::Mutex::new(password),
             password_changed_at: std::sync::Mutex::new(password_changed_at),
         }
     }
 
     pub fn verify_password(&self, password: &str) -> bool {
-        if let Ok(password_hash) = self.password_hash.lock() {
-            if let Some(ref hash) = *password_hash {
-                bcrypt::verify(password, hash).unwrap_or(false)
+        if let Ok(stored_password) = self.password.lock() {
+            if let Some(ref stored) = *stored_password {
+                password == stored
             } else {
                 false
             }

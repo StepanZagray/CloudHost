@@ -9,6 +9,12 @@ pub enum PasswordMode {
     Confirming,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PasswordDisplayState {
+    #[default]
+    Hidden, // Hidden with asterisks (*)
+    Visible, // Fully visible
+}
 /// Password creation state that can be used across different parts of the application
 #[derive(Default)]
 pub struct PasswordCreationState {
@@ -18,6 +24,7 @@ pub struct PasswordCreationState {
     pub password_mode: PasswordMode,
     pub password_error: Option<String>,
     pub password_success: bool,
+    pub display_state: PasswordDisplayState,
 }
 
 impl PasswordCreationState {
@@ -29,6 +36,7 @@ impl PasswordCreationState {
             password_mode: PasswordMode::default(),
             password_error: None,
             password_success: false,
+            display_state: PasswordDisplayState::Hidden,
         }
     }
 

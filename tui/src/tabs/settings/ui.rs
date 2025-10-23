@@ -18,12 +18,35 @@ pub fn render_settings_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
     let tui_config_path = cloudhost_server::config_paths::get_tui_config_path();
     let clouds_config_path = cloudhost_server::config_paths::get_clouds_config_path();
 
+    // Get keybinds dynamically from config
+    let reload_tui_keys = app
+        .config
+        .get_keys_for_action("Reload TUI Config")
+        .join(", ");
+    let reload_clouds_keys = app
+        .config
+        .get_keys_for_action("Reload Clouds Config")
+        .join(", ");
+    let reload_all_keys = app
+        .config
+        .get_keys_for_action("Reload All Configs")
+        .join(", ");
+
     let items = vec![
         ListItem::new("📄 TUI Config File"),
         ListItem::new(format!("   {}", tui_config_path.display())),
         ListItem::new(""),
         ListItem::new("☁️  Clouds Config File"),
         ListItem::new(format!("   {}", clouds_config_path.display())),
+        ListItem::new(""),
+        ListItem::new(format!("🔄 Reload TUI Config ({})", reload_tui_keys)),
+        ListItem::new("   Reload TUI keybinds and settings without restart"),
+        ListItem::new(""),
+        ListItem::new(format!("🔄 Reload Clouds Config ({})", reload_clouds_keys)),
+        ListItem::new("   Reload clouds and restart affected servers"),
+        ListItem::new(""),
+        ListItem::new(format!("🔄 Reload All Configs ({})", reload_all_keys)),
+        ListItem::new("   Reload both TUI and clouds configs"),
         ListItem::new(""),
         ListItem::new("🔄 Reset TUI Config to Default"),
         ListItem::new("   ⚠️  This will delete your current keybinds and restore defaults"),

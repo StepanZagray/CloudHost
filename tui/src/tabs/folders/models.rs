@@ -19,6 +19,17 @@ pub enum FolderInputField {
     Path,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloudEditFocus {
+    Name,
+    Folders,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PasswordDisplayState {
+    #[default]
+    Hidden, // Hidden with asterisks (*)
+    Visible, // Fully visible
+}
 pub struct FoldersState {
     pub cloud_folders: Vec<CloudFolder>,
     pub selected_folder_index: usize,
@@ -46,8 +57,10 @@ pub struct FoldersState {
     pub edit_cloud_original_name: String,
     pub edit_cloud_name: String,
     pub edit_cloud_selected_folders: std::collections::HashSet<usize>, // Folders selected for this group
+    pub cloud_edit_focus: CloudEditFocus,
     pub cloud_edit_error: Option<String>,
     pub focused_panel: FocusedPanel,
+    pub password_display_state: PasswordDisplayState,
     pub folders_list_state: ListState,
     pub folders_scroll_state: ScrollbarState,
     pub clouds_list_state: ListState,
@@ -81,8 +94,10 @@ impl Default for FoldersState {
             edit_cloud_original_name: String::new(),
             edit_cloud_name: String::new(),
             edit_cloud_selected_folders: std::collections::HashSet::new(),
+            cloud_edit_focus: CloudEditFocus::Name,
             cloud_edit_error: None,
             focused_panel: FocusedPanel::Folders,
+            password_display_state: PasswordDisplayState::default(),
             folders_list_state: ListState::default(),
             folders_scroll_state: ScrollbarState::default(),
             clouds_list_state: ListState::default(),
@@ -201,6 +216,7 @@ impl FoldersState {
             self.editing_cloud = true;
             self.edit_cloud_original_name = cloud.name.clone();
             self.edit_cloud_name = cloud.name.clone();
+            self.cloud_edit_focus = CloudEditFocus::Name;
             self.cloud_edit_error = None;
 
             // Mark folders that are in this cloud as selected
@@ -218,6 +234,7 @@ impl FoldersState {
         self.edit_cloud_original_name.clear();
         self.edit_cloud_name.clear();
         self.edit_cloud_selected_folders.clear();
+        self.cloud_edit_focus = CloudEditFocus::Name;
         self.cloud_edit_error = None;
     }
 
@@ -242,6 +259,22 @@ impl FoldersState {
                     .map(|folder| folder.name.clone())
             })
             .collect()
+    }
+
+    /// Toggle password display state between hidden and visible
+    pub fn toggle_password_display(&mut self) {
+        self.password_display_state = match self.password_display_state {
+            PasswordDisplayState::Hidden => PasswordDisplayState::Visible,
+            PasswordDisplayState::Visible => PasswordDisplayState::Hidden,
+        };
+    }
+
+    /// Get password display text based on current state
+    pub fn get_password_display(&self, password: &str) -> String {
+        match self.password_display_state {
+            PasswordDisplayState::Hidden => "*".repeat(password.len()),
+            PasswordDisplayState::Visible => password.to_string(),
+        }
     }
 
     pub fn handle_folders_navigation(&mut self, key: KeyCode) -> bool {
@@ -289,6 +322,7 @@ impl FoldersState {
         match key {
             KeyCode::Up | KeyCode::Char('k') => {
                 if !self.clouds.is_empty() {
+                    self.password_display_state = PasswordDisplayState::Hidden;
                     self.selected_cloud_index = self.selected_cloud_index.saturating_sub(1);
                     if self.selected_cloud_index >= self.clouds.len() {
                         self.selected_cloud_index = self.clouds.len().saturating_sub(1);
@@ -300,6 +334,7 @@ impl FoldersState {
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 if !self.clouds.is_empty() {
+                    self.password_display_state = PasswordDisplayState::Hidden;
                     self.selected_cloud_index =
                         (self.selected_cloud_index + 1).min(self.clouds.len().saturating_sub(1));
                     self.clouds_list_state

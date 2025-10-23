@@ -16,6 +16,9 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: cloudhost-linux
+          - os: ubuntu-latest
+            target: aarch64-linux-android
+            artifact_name: cloudhost-android
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: cloudhost-windows
@@ -28,7 +31,15 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
-        
+        targets: ${{ matrix.target }}
+    
+    - name: Setup Android NDK
+      if: matrix.target == 'aarch64-linux-android'
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: '26.1.10909125'
+        add-to-path: true
+    
     - name: Cache cargo registry
       uses: actions/cache@v4
       with:
@@ -83,7 +94,13 @@ jobs:
         Write-Host "Signer Certificate: $($signature.SignerCertificate.Subject)"
     
     - name: Create release artifacts (Linux)
-      if: matrix.os == 'ubuntu-latest'
+      if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
+      run: |
+        mkdir -p release
+        cp target/${{ matrix.target }}/release/cloudhost-tui release/cloudhost-tui
+    
+    - name: Create release artifacts (Android)
+      if: matrix.os == 'ubuntu-latest' && matrix.target == 'aarch64-linux-android'
       run: |
         mkdir -p release
         cp target/${{ matrix.target }}/release/cloudhost-tui release/cloudhost-tui
@@ -122,6 +139,8 @@ jobs:
       run: |
         cd artifacts/cloudhost-linux
         sha256sum cloudhost-tui > cloudhost-tui.sha256
+        cd ../cloudhost-android
+        sha256sum cloudhost-tui > cloudhost-tui.sha256
         cd ../cloudhost-windows
         sha256sum cloudhost-tui.exe > cloudhost-tui.exe.sha256
     
@@ -131,6 +150,8 @@ jobs:
         files: |
           artifacts/cloudhost-linux/cloudhost-tui
           artifacts/cloudhost-linux/cloudhost-tui.sha256
+          artifacts/cloudhost-android/cloudhost-tui
+          artifacts/cloudhost-android/cloudhost-tui.sha256
           artifacts/cloudhost-windows/cloudhost-tui.exe
           artifacts/cloudhost-windows/cloudhost-tui.exe.sha256
         generate_release_notes: true
@@ -157,9 +178,20 @@ jobs:
           # Linux
           sha256sum -c cloudhost-tui.sha256
           
+          # Android (Termux)
+          sha256sum -c cloudhost-tui.sha256
+          
           # Windows (PowerShell)
           Get-FileHash cloudhost-tui.exe -Algorithm SHA256
           ```
+          
+          ## Android/Termux Usage
+          
+          The Android build is compiled for ARM64 (aarch64) and should work on most modern Android devices with Termux:
+          1. Install Termux from F-Droid or Google Play
+          2. Download the `cloudhost-tui` binary for Android
+          3. Make it executable: `chmod +x cloudhost-tui`
+          4. Run: `./cloudhost-tui`
           
           ## Signature Verification (Windows)
           

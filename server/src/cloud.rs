@@ -32,7 +32,7 @@ impl CloudFolder {
 pub struct Cloud {
     pub name: String,
     pub cloud_folders: Vec<CloudFolder>,
-    pub password_hash: Option<String>,
+    pub password: Option<String>,
     pub password_changed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub jwt_secret: String,
 }
@@ -59,7 +59,7 @@ impl Cloud {
         Self {
             name: name.clone(),
             cloud_folders,
-            password_hash: None,
+            password: None,
             password_changed_at: None,
             jwt_secret: Self::generate_jwt_secret(&name),
         }
@@ -78,22 +78,21 @@ impl Cloud {
     }
 
     /// Set password for this cloud
-    pub fn set_password(&mut self, password: &str) -> Result<(), bcrypt::BcryptError> {
-        let hash = bcrypt::hash(password, bcrypt::DEFAULT_COST)?;
-        self.password_hash = Some(hash);
+    pub fn set_password(&mut self, password: &str) -> Result<(), String> {
+        self.password = Some(password.to_string());
         self.password_changed_at = Some(chrono::Utc::now());
         Ok(())
     }
 
     /// Check if password is set
     pub fn has_password(&self) -> bool {
-        self.password_hash.is_some()
+        self.password.is_some()
     }
 
     /// Verify password
     pub fn verify_password(&self, password: &str) -> bool {
-        if let Some(ref hash) = self.password_hash {
-            bcrypt::verify(password, hash).unwrap_or(false)
+        if let Some(ref stored_password) = self.password {
+            password == stored_password
         } else {
             false
         }

@@ -95,6 +95,34 @@ impl Default for Config {
                 tab: "folders".to_string(),
             },
         );
+        actions.insert(
+            "Toggle Password Visibility".to_string(),
+            Action {
+                keys: vec!["<leader>p".to_string()],
+                tab: "folders".to_string(),
+            },
+        );
+        actions.insert(
+            "Reload TUI Config".to_string(),
+            Action {
+                keys: vec!["<leader>r".to_string()],
+                tab: "settings".to_string(),
+            },
+        );
+        actions.insert(
+            "Reload Clouds Config".to_string(),
+            Action {
+                keys: vec!["<leader>c".to_string()],
+                tab: "settings".to_string(),
+            },
+        );
+        actions.insert(
+            "Reload All Configs".to_string(),
+            Action {
+                keys: vec!["<leader>R".to_string()],
+                tab: "settings".to_string(),
+            },
+        );
 
         // Vim-style navigation keys
         actions.insert(
