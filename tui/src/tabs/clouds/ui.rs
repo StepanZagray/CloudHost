@@ -21,9 +21,9 @@ pub fn render_servers_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
     let three_column_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length((area.width * 15 / 100).max(25)), // Left: clouds (15% or min 15 chars)
-            Constraint::Length((area.width * 35 / 100).max(45)), // Middle: server info (35% or min 30 chars)
-            Constraint::Min(30), // Right: server logs (50% - remaining space)
+            Constraint::Length((area.width * 10 / 100).max(20)), // Left: clouds (15% or min 15 chars)
+            Constraint::Length(40), // Middle: server info (35% or min 30 chars)
+            Constraint::Min(30),    // Right: server logs (50% - remaining space)
         ])
         .split(area);
 

@@ -32,7 +32,7 @@ pub fn render_settings_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
         .get_keys_for_action("Reload All Configs")
         .join(", ");
 
-    let items = vec![
+    let mut items = vec![
         ListItem::new("📄 TUI Config File"),
         ListItem::new(format!("   {}", tui_config_path.display())),
         ListItem::new(""),
@@ -48,10 +48,13 @@ pub fn render_settings_tab(app: &mut App, area: Rect, buf: &mut Buffer) {
         ListItem::new(format!("🔄 Reload All Configs ({})", reload_all_keys)),
         ListItem::new("   Reload both TUI and clouds configs"),
         ListItem::new(""),
-        ListItem::new("🔄 Reset TUI Config to Default"),
-        ListItem::new("   ⚠️  This will delete your current keybinds and restore defaults"),
-        ListItem::new("   ℹ️  Restart the app to see the changes"),
     ];
+
+    items.push(ListItem::new("🔄 Reset TUI Config to Default"));
+    items.push(ListItem::new(
+        "   ⚠️  This will delete your current keybinds and restore defaults",
+    ));
+    items.push(ListItem::new("   ℹ️  Restart the app to see the changes"));
 
     // Create the list
     let list = List::new(items.clone())

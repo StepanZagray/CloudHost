@@ -281,9 +281,46 @@ async fn browse_directory_internal(
             .file-icon {{ margin-right: 10px; font-size: 18px; }}
             .file-name {{ flex: 1; }}
             .file-size {{ color: #666; margin-left: 10px; }}
+            .file-actions {{ margin-left: 10px; }}
             .file-item a {{ color: #0066cc; text-decoration: none; }}
             .file-item a:hover {{ text-decoration: underline; }}
             .directory {{ background: #e8f4fd; }}
+            .delete-btn {{ 
+                background: #dc3545; 
+                color: white; 
+                border: none; 
+                padding: 4px 8px; 
+                border-radius: 3px; 
+                cursor: pointer; 
+                font-size: 12px;
+            }}
+            .delete-btn:hover {{ background: #c82333; }}
+            .upload-section {{ 
+                background: #f0f8ff; 
+                padding: 20px; 
+                border-radius: 5px; 
+                margin-bottom: 20px; 
+            }}
+            .upload-section form {{ 
+                display: flex; 
+                align-items: center; 
+                gap: 10px; 
+            }}
+            .upload-section input[type="file"] {{ 
+                flex: 1; 
+                padding: 8px; 
+                border: 1px solid #ddd; 
+                border-radius: 3px; 
+            }}
+            .upload-section button {{ 
+                background: #28a745; 
+                color: white; 
+                border: none; 
+                padding: 8px 16px; 
+                border-radius: 3px; 
+                cursor: pointer; 
+            }}
+            .upload-section button:hover {{ background: #218838; }}
         </style>
     </head>
     <body>
@@ -298,11 +335,82 @@ async fn browse_directory_internal(
                 /{}
             </div>
             
+            <div class="upload-section">
+                <h2>📤 Upload File</h2>
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <input type="file" id="fileInput" name="file" required>
+                    <button type="submit">Upload</button>
+                </form>
+            </div>
+            
             <div class="file-list">
                 <h2>📂 Directory Contents</h2>
                 {}
             </div>
         </div>
+        
+        <script>
+            document.getElementById('uploadForm').addEventListener('submit', async function(e) {{
+                e.preventDefault();
+                const fileInput = document.getElementById('fileInput');
+                const file = fileInput.files[0];
+                
+                if (!file) {{
+                    alert('Please select a file to upload');
+                    return;
+                }}
+                
+                // Construct the upload URL from the current page path
+                const currentPath = window.location.pathname;
+                const pathParts = currentPath.split('/');
+                const cloudFolder = pathParts[2]; // /web/cloud_folder/files/...
+                const subPath = pathParts.slice(4).join('/'); // everything after /files/
+                const uploadUrl = `/api/upload/${{cloudFolder}}${{subPath ? '/' + subPath : ''}}`;
+                
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                try {{
+                    const response = await fetch(uploadUrl, {{
+                        method: 'POST',
+                        body: formData
+                    }});
+                    const result = await response.json();
+                    if (response.ok) {{
+                        alert('File uploaded successfully!');
+                        location.reload();
+                    }} else {{
+                        alert('Upload failed: ' + result.error);
+                    }}
+                }} catch (error) {{
+                    alert('Upload failed: ' + error.message);
+                }}
+            }});
+
+            // Delete file function
+            async function deleteFile(cloudFolder, filePath) {{
+                if (!confirm(`Are you sure you want to delete "${{filePath}}"?`)) {{
+                    return;
+                }}
+                
+                try {{
+                    const response = await fetch(`/api/delete/${{cloudFolder}}/${{filePath}}`, {{
+                        method: 'DELETE'
+                    }});
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok) {{
+                        alert(`File deleted successfully!\\nPlatform: ${{result.platform}}\\n${{result.trash_info}}`);
+                        location.reload();
+                    }} else {{
+                        alert('Delete failed: ' + result.error);
+                    }}
+                }} catch (error) {{
+                    alert('Delete failed: ' + error.message);
+                }}
+            }}
+        </script>
     </body>
     </html>
     "#,
@@ -492,13 +600,24 @@ fn generate_file_list(items: &[serde_json::Value], cloud_folder_name: &str) -> S
             format!("/api/{}/static/{}", cloud_folder_name, path)
         };
 
+        // Add delete button for files only
+        let delete_button = if !is_dir {
+            format!(
+                r#"<button class="delete-btn" onclick="deleteFile('{}', '{}')" title="Delete file">🗑️</button>"#,
+                cloud_folder_name, path
+            )
+        } else {
+            String::new()
+        };
+
         html.push_str(&format!(
             r#"<div class="file-item {}">
                 <span class="file-icon">{}</span>
                 <span class="file-name"><a href="{}">{}</a></span>
                 <span class="file-size">{}</span>
+                <span class="file-actions">{}</span>
             </div>"#,
-            class, icon, link_url, name, size
+            class, icon, link_url, name, size, delete_button
         ));
     }
 

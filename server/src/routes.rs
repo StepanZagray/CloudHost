@@ -16,7 +16,9 @@ pub use crate::web_routes::cloud_folder::{browse_file_or_directory, serve_static
 pub use crate::api_routes::cloud::{
     api_browse_file_or_directory, api_list_cloud_folder_files, get_cloud_folder_info,
 };
+pub use crate::api_routes::delete::api_delete_file;
 pub use crate::api_routes::index::api_index;
+pub use crate::api_routes::upload::api_upload_file;
 
 // Wrapper for login function to work with CloudServerState
 pub async fn login(

@@ -17,13 +17,13 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 anyhow = "1.0"
 
 [workspace.package]
-version = "0.3.4"
+version = "0.4.0"
 edition = "2021"
 authors = ["Stepan Zagray"]
-description = "Personal Cloud Storage Server with UI"
+description = "Personal Cloud Storage Server with TUI (Terminal User Interface)"
 license = "MIT"
-repository = "https://github.com/yourusername/cloudhost"
-keywords = ["cloud", "storage", "server", "tui", "personal"]
+repository = "https://github.com/yourusername/cloudhost-tui"
+keywords = ["cloud", "storage", "server", "tui", "terminal", "personal"]
 categories = ["command-line-utilities", "web-programming::http-server"]
 
 # Windows-specific optimizations to reduce false positives

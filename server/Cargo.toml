@@ -3,12 +3,13 @@ name = "cloudhost-server"
 version = { workspace = true }
 edition = { workspace = true }
 authors = { workspace = true }
-description = { workspace = true }
+description = "Cloud Storage Server Backend for CloudHost TUI"
 license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
 axum = { version = "0.7", features = ["macros"] }
+axum-extra = { version = "0.9", features = ["multipart"] }
 tokio = { workspace = true }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
@@ -24,3 +25,4 @@ mime_guess = "2.0"
 bcrypt = "0.15"
 jsonwebtoken = "9.0"
 toml = "0.8"
+trash = "5.0"

@@ -7,6 +7,7 @@ pub mod debug_stream;
 pub mod error;
 pub mod orchestrator;
 pub mod routes;
+pub mod utils;
 pub mod web_routes;
 
 pub use cloud::{Cloud, CloudFolder};

@@ -51,9 +51,9 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
     
-    - name: Build CloudHost (TUI)
+    - name: Build CloudHost TUI
       run: |
-        cargo build --release --target ${{ matrix.target }} --bin cloudhost-tui --verbose
+        cargo build --release --target ${{ matrix.target }} --verbose
       env:
         CARGO_TERM_COLOR: always
         RUST_BACKTRACE: 1

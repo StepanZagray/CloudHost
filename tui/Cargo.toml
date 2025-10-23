@@ -3,7 +3,7 @@ name = "cloudhost-tui"
 version = { workspace = true }
 edition = { workspace = true }
 authors = { workspace = true }
-description = { workspace = true }
+description = "Personal Cloud Storage Server with TUI (Terminal User Interface)"
 license = { workspace = true }
 repository = { workspace = true }
 keywords = { workspace = true }

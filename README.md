@@ -1,13 +1,13 @@
-# CloudHost
+# CloudHost TUI
 
-A secure file server that helps users host their files locally with a modern web interface and REST API.
+A secure file server with a terminal user interface (TUI) that helps users host their files locally with a modern web interface and REST API.
 
-Features a terminal user interface (TUI) with vim-like navigation for management and a web interface for file browsing with JWT-based authentication.
+**This is the TUI version of CloudHost** - featuring a terminal user interface with vim-like navigation for management and a web interface for file browsing with JWT-based authentication.
 
 ## Installation
 
 ### Option 1: Pre-built binary (Recommended)
-Download the latest release from [GitHub Releases](https://github.com/StepanZagray/CloudHost/releases)
+Download the latest release from [GitHub Releases](https://github.com/StepanZagray/cloudhost-tui/releases)
 
 #### Windows Defender Warning
 If Windows Defender shows a virus warning:
@@ -19,21 +19,17 @@ This is a false positive. The source code is available for inspection.
 
 ### Option 2: Build from source
 ```bash
-git clone https://github.com/StepanZagray/CloudHost.git
-cd CloudHost
+git clone https://github.com/StepanZagray/cloudhost-tui.git
+cd cloudhost-tui
 
-# Build TUI (terminal interface) - Currently the only available UI
-cargo build --release -p cloudhost-tui
+# Build the TUI application
+cargo build --release
 ./target/release/cloudhost-tui
-
-# Future UIs (when available)
-# cargo build --release -p cloudhost-gui    # Desktop GUI
-# cargo build --release -p cloudhost-web    # Web UI
 ```
 
 ### Option 3: Install via cargo
 ```bash
-cargo install --git https://github.com/StepanZagray/CloudHost.git --bin cloudhost-tui
+cargo install --git https://github.com/StepanZagray/cloudhost-tui.git --bin cloudhost-tui
 cloudhost-tui
 ```
 
@@ -62,7 +58,6 @@ cloudhost-tui
 
 
 ## To-Do features:
-- upload functionality
-- users with different permissions(look, download, upload)
+- passwords with different permissions(download only, all)
 - make it possible to share cloudfolders on several devices, and sync files between them
 

@@ -195,6 +195,11 @@ impl CloudServer {
             .route(
                 "/api/:cloud_folder_name/static/*path",
                 get(routes::serve_static_file),
+            )
+            .route("/api/upload/*path", post(routes::api_upload_file))
+            .route(
+                "/api/delete/*path",
+                axum::routing::delete(routes::api_delete_file),
             );
 
         // Add dynamic routes for cloud folders
