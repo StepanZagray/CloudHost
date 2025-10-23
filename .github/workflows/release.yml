@@ -190,12 +190,33 @@ jobs:
     
     - name: Generate checksums
       run: |
-        cd artifacts/cloudhost-linux
-        sha256sum cloudhost-tui > cloudhost-tui.sha256
-        cd ../cloudhost-android
-        sha256sum cloudhost-tui > cloudhost-tui.sha256
-        cd ../cloudhost-windows
-        sha256sum cloudhost-tui.exe > cloudhost-tui.exe.sha256
+        # Generate checksums for each artifact if it exists
+        if [ -d "artifacts/cloudhost-linux" ] && [ -f "artifacts/cloudhost-linux/cloudhost-tui" ]; then
+          echo "Generating checksum for Linux artifact..."
+          cd artifacts/cloudhost-linux
+          sha256sum cloudhost-tui > cloudhost-tui.sha256
+          cd ../..
+        else
+          echo "Linux artifact not found, skipping checksum generation"
+        fi
+        
+        if [ -d "artifacts/cloudhost-android" ] && [ -f "artifacts/cloudhost-android/cloudhost-tui" ]; then
+          echo "Generating checksum for Android artifact..."
+          cd artifacts/cloudhost-android
+          sha256sum cloudhost-tui > cloudhost-tui.sha256
+          cd ../..
+        else
+          echo "Android artifact not found, skipping checksum generation"
+        fi
+        
+        if [ -d "artifacts/cloudhost-windows" ] && [ -f "artifacts/cloudhost-windows/cloudhost-tui.exe" ]; then
+          echo "Generating checksum for Windows artifact..."
+          cd artifacts/cloudhost-windows
+          sha256sum cloudhost-tui.exe > cloudhost-tui.exe.sha256
+          cd ../..
+        else
+          echo "Windows artifact not found, skipping checksum generation"
+        fi
     
     - name: Create Release
       uses: softprops/action-gh-release@v2
