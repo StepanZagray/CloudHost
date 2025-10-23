@@ -54,7 +54,8 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
     
-    - name: Build CloudHost TUI
+    - name: Build CloudHost TUI (Linux/Android)
+      if: matrix.os == 'ubuntu-latest'
       run: |
         # Set up environment variables for Android build
         if [ "${{ matrix.target }}" = "aarch64-linux-android" ]; then
@@ -81,6 +82,18 @@ jobs:
           echo "Android build verification:"
           file target/${{ matrix.target }}/release/cloudhost-tui || echo "Binary not found"
         fi
+      env:
+        CARGO_TERM_COLOR: always
+        RUST_BACKTRACE: 1
+
+    - name: Build CloudHost TUI (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        cargo build --release --target ${{ matrix.target }} --verbose
+        
+        # Verify the build was successful
+        echo "Build completed. Checking output:"
+        dir target\${{ matrix.target }}\release\ || echo "No release directory found"
       env:
         CARGO_TERM_COLOR: always
         RUST_BACKTRACE: 1
