@@ -29,7 +29,12 @@ uuid = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 dirs = "5.0"
-cloudhost-server = { path = "../server" }
+cloudhost-server = { path = "../server", default-features = false }
 tracing-subscriber = "0.3"
 clap = { version = "4.4", features = ["derive"] }
 open = "5.0"
+
+[features]
+default = ["desktop"]
+desktop = ["cloudhost-server/desktop"]
+mobile = ["cloudhost-server/mobile"]
