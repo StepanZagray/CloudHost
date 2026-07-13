@@ -7,10 +7,9 @@ use ratatui::widgets::{ListState, ScrollbarState};
 pub use cloudhost_server::{Cloud, CloudFolder};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FocusedPanel {
+pub enum StoragePanel {
     Folders,
     Clouds,
-    Info,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,13 +29,13 @@ pub enum PasswordDisplayState {
     Hidden, // Hidden with asterisks (*)
     Visible, // Fully visible
 }
-pub struct FoldersState {
-    pub cloud_folders: Vec<CloudFolder>,
+pub struct StorageState {
+    pub folders: Vec<CloudFolder>,
     pub selected_folder_index: usize,
-    pub selected_folders: std::collections::HashSet<usize>, // Track selected folder indices
+    pub selected_folders: std::collections::HashSet<usize>,
     pub clouds: Vec<Cloud>,
     pub selected_cloud_index: usize,
-    pub creating_folder: bool,
+    pub adding_folder: bool,
     pub new_folder_name: String,
     pub new_folder_path: String,
     pub folder_input_field: FolderInputField,
@@ -56,10 +55,10 @@ pub struct FoldersState {
     pub editing_cloud: bool,
     pub edit_cloud_original_name: String,
     pub edit_cloud_name: String,
-    pub edit_cloud_selected_folders: std::collections::HashSet<usize>, // Folders selected for this group
+    pub edit_cloud_selected_folders: std::collections::HashSet<usize>,
     pub cloud_edit_focus: CloudEditFocus,
     pub cloud_edit_error: Option<String>,
-    pub focused_panel: FocusedPanel,
+    pub focused_panel: StoragePanel,
     pub password_display_state: PasswordDisplayState,
     pub folders_list_state: ListState,
     pub folders_scroll_state: ScrollbarState,
@@ -67,15 +66,15 @@ pub struct FoldersState {
     pub clouds_scroll_state: ScrollbarState,
 }
 
-impl Default for FoldersState {
+impl Default for StorageState {
     fn default() -> Self {
         Self {
-            cloud_folders: Vec::new(),
+            folders: Vec::new(),
             selected_folder_index: 0,
             selected_folders: std::collections::HashSet::new(),
             clouds: Vec::new(),
             selected_cloud_index: 0,
-            creating_folder: false,
+            adding_folder: false,
             new_folder_name: String::new(),
             new_folder_path: String::new(),
             folder_input_field: FolderInputField::Name,
@@ -96,7 +95,7 @@ impl Default for FoldersState {
             edit_cloud_selected_folders: std::collections::HashSet::new(),
             cloud_edit_focus: CloudEditFocus::Name,
             cloud_edit_error: None,
-            focused_panel: FocusedPanel::Folders,
+            focused_panel: StoragePanel::Folders,
             password_display_state: PasswordDisplayState::default(),
             folders_list_state: ListState::default(),
             folders_scroll_state: ScrollbarState::default(),
@@ -106,42 +105,38 @@ impl Default for FoldersState {
     }
 }
 
-impl TabFocus for FoldersState {
+impl TabFocus for StorageState {
     fn get_focused_element(&self) -> String {
         match self.focused_panel {
-            FocusedPanel::Folders => "FoldersList".to_string(),
-            FocusedPanel::Clouds => "CloudsList".to_string(),
-            FocusedPanel::Info => "InfoPanel".to_string(),
+            StoragePanel::Folders => "FoldersList".to_string(),
+            StoragePanel::Clouds => "CloudsList".to_string(),
         }
     }
 
     fn cycle_focus_forward(&mut self) {
         self.focused_panel = match self.focused_panel {
-            FocusedPanel::Folders => FocusedPanel::Clouds,
-            FocusedPanel::Clouds => FocusedPanel::Folders,
-            FocusedPanel::Info => FocusedPanel::Folders, // Info panel is not focusable
+            StoragePanel::Folders => StoragePanel::Clouds,
+            StoragePanel::Clouds => StoragePanel::Folders,
         };
     }
 
     fn cycle_focus_backward(&mut self) {
         self.focused_panel = match self.focused_panel {
-            FocusedPanel::Folders => FocusedPanel::Clouds,
-            FocusedPanel::Clouds => FocusedPanel::Folders,
-            FocusedPanel::Info => FocusedPanel::Folders, // Info panel is not focusable
+            StoragePanel::Folders => StoragePanel::Clouds,
+            StoragePanel::Clouds => StoragePanel::Folders,
         };
     }
 
     fn handle_navigation(&mut self, key: KeyCode) -> bool {
         match self.focused_panel {
-            FocusedPanel::Folders => self.handle_folders_navigation(key),
-            FocusedPanel::Clouds => self.handle_clouds_navigation(key),
-            FocusedPanel::Info => false, // Info panel is not navigable
+            StoragePanel::Folders => self.handle_folders_navigation(key),
+            StoragePanel::Clouds => self.handle_clouds_navigation(key),
         }
     }
 }
 
-impl FoldersState {
-    pub fn get_selected_folders_count(&self) -> usize {
+impl StorageState {
+    pub fn selected_folder_count(&self) -> usize {
         self.selected_folders.len()
     }
 
@@ -157,13 +152,13 @@ impl FoldersState {
         }
     }
 
-    pub fn clear_folder_selections(&mut self) {
+    pub fn clear_folder_selection(&mut self) {
         self.selected_folders.clear();
     }
 
     pub fn select_all_folders(&mut self) {
         self.selected_folders.clear();
-        for i in 0..self.cloud_folders.len() {
+        for i in 0..self.folders.len() {
             self.selected_folders.insert(i);
         }
     }
@@ -181,19 +176,15 @@ impl FoldersState {
         self.password_creation.clear_password_creation();
     }
 
-    pub fn get_selected_folder_names(&self) -> Vec<String> {
+    pub fn selected_folder_names(&self) -> Vec<String> {
         self.selected_folders
             .iter()
-            .filter_map(|&index| {
-                self.cloud_folders
-                    .get(index)
-                    .map(|folder| folder.name.clone())
-            })
+            .filter_map(|&index| self.folders.get(index).map(|folder| folder.name.clone()))
             .collect()
     }
 
     pub fn start_editing_folder(&mut self) {
-        if let Some(folder) = self.cloud_folders.get(self.selected_folder_index) {
+        if let Some(folder) = self.folders.get(self.selected_folder_index) {
             self.editing_folder = true;
             self.edit_folder_original_name = folder.name.clone();
             self.edit_folder_name = folder.name.clone();
@@ -219,10 +210,14 @@ impl FoldersState {
             self.cloud_edit_focus = CloudEditFocus::Name;
             self.cloud_edit_error = None;
 
-            // Mark folders that are in this cloud as selected
+            // Mark folders included in this cloud as selected.
             self.edit_cloud_selected_folders.clear();
-            for (index, folder) in self.cloud_folders.iter().enumerate() {
-                if cloud.cloud_folders.iter().any(|cf| cf.name == folder.name) {
+            for (index, folder) in self.folders.iter().enumerate() {
+                if cloud
+                    .cloud_folders
+                    .iter()
+                    .any(|included| included.name == folder.name)
+                {
                     self.edit_cloud_selected_folders.insert(index);
                 }
             }
@@ -250,14 +245,10 @@ impl FoldersState {
         self.edit_cloud_selected_folders.contains(&index)
     }
 
-    pub fn get_edit_cloud_selected_folder_names(&self) -> Vec<String> {
+    pub fn selected_cloud_folder_names(&self) -> Vec<String> {
         self.edit_cloud_selected_folders
             .iter()
-            .filter_map(|&index| {
-                self.cloud_folders
-                    .get(index)
-                    .map(|folder| folder.name.clone())
-            })
+            .filter_map(|&index| self.folders.get(index).map(|folder| folder.name.clone()))
             .collect()
     }
 
@@ -280,10 +271,10 @@ impl FoldersState {
     pub fn handle_folders_navigation(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::Up | KeyCode::Char('k') => {
-                if !self.cloud_folders.is_empty() {
+                if !self.folders.is_empty() {
                     self.selected_folder_index = self.selected_folder_index.saturating_sub(1);
-                    if self.selected_folder_index >= self.cloud_folders.len() {
-                        self.selected_folder_index = self.cloud_folders.len().saturating_sub(1);
+                    if self.selected_folder_index >= self.folders.len() {
+                        self.selected_folder_index = self.folders.len().saturating_sub(1);
                     }
                     self.folders_list_state
                         .select(Some(self.selected_folder_index));
@@ -291,24 +282,24 @@ impl FoldersState {
                 true
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if !self.cloud_folders.is_empty() {
-                    self.selected_folder_index = (self.selected_folder_index + 1)
-                        .min(self.cloud_folders.len().saturating_sub(1));
+                if !self.folders.is_empty() {
+                    self.selected_folder_index =
+                        (self.selected_folder_index + 1).min(self.folders.len().saturating_sub(1));
                     self.folders_list_state
                         .select(Some(self.selected_folder_index));
                 }
                 true
             }
             KeyCode::Char('g') => {
-                if !self.cloud_folders.is_empty() {
+                if !self.folders.is_empty() {
                     self.selected_folder_index = 0;
                     self.folders_list_state.select(Some(0));
                 }
                 true
             }
             KeyCode::Char('G') => {
-                if !self.cloud_folders.is_empty() {
-                    self.selected_folder_index = self.cloud_folders.len().saturating_sub(1);
+                if !self.folders.is_empty() {
+                    self.selected_folder_index = self.folders.len().saturating_sub(1);
                     self.folders_list_state
                         .select(Some(self.selected_folder_index));
                 }

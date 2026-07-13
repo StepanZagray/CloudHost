@@ -1,9 +1,9 @@
 #[derive(Debug, Clone, PartialEq, Default)]
-pub enum CloudFocusedPanel {
+pub enum DashboardPanel {
     #[default]
-    Clouds,
-    CloudInfo,
-    CloudLogs,
+    Services,
+    Overview,
+    Activity,
 }
 use crate::tabs::focus::TabFocus;
 use crate::utils::password::PasswordCreationState;
@@ -13,34 +13,30 @@ use ratatui::widgets::{ListState, ScrollbarState};
 use std::collections::HashMap;
 
 #[derive(Default)]
-pub struct CloudsState {
+pub struct DashboardState {
     pub clouds: Vec<Cloud>,
     pub selected_cloud_index: usize,
     pub cloud_start_error: Option<String>,
-    pub cloud_logs: Vec<String>,
-    pub log_scroll_offset: usize,
-    pub focused_panel: CloudFocusedPanel,
+    pub focused_panel: DashboardPanel,
     pub running_clouds: HashMap<String, u16>,
-    pub cloud_logs_list_state: ListState,
-    pub cloud_logs_scroll_state: ScrollbarState,
+    pub activity_list_state: ListState,
+    pub activity_scroll_state: ScrollbarState,
     pub clouds_list_state: ListState,
     pub clouds_scroll_state: ScrollbarState,
     // Shared password creation state
     pub password_creation: PasswordCreationState,
 }
 
-impl CloudsState {
+impl DashboardState {
     pub fn new() -> Self {
         Self {
             clouds: Vec::new(),
             selected_cloud_index: 0,
             cloud_start_error: None,
-            cloud_logs: Vec::new(),
-            log_scroll_offset: 0,
-            focused_panel: CloudFocusedPanel::Clouds,
+            focused_panel: DashboardPanel::Services,
             running_clouds: HashMap::new(),
-            cloud_logs_list_state: ListState::default(),
-            cloud_logs_scroll_state: ScrollbarState::default(),
+            activity_list_state: ListState::default(),
+            activity_scroll_state: ScrollbarState::default(),
             clouds_list_state: ListState::default(),
             clouds_scroll_state: ScrollbarState::default(),
             password_creation: PasswordCreationState::new(),
@@ -48,7 +44,7 @@ impl CloudsState {
     }
 }
 
-impl CloudsState {
+impl DashboardState {
     pub async fn start_server(&mut self, orchestrator: &mut Orchestrator) {
         if self.clouds.is_empty() || self.selected_cloud_index >= self.clouds.len() {
             self.cloud_start_error = Some("❌ No cloud selected".to_string());
@@ -60,10 +56,6 @@ impl CloudsState {
         match orchestrator.start_cloud(cloud_name).await {
             Ok(port) => {
                 self.running_clouds.insert(cloud_name.clone(), port);
-                self.cloud_logs.push(format!(
-                    "✅ Started cloud '{}' on port {}",
-                    cloud_name, port
-                ));
                 self.cloud_start_error = None;
             }
             Err(e) => {
@@ -82,21 +74,6 @@ impl CloudsState {
         match orchestrator.stop_cloud(cloud_name).await {
             Ok(_) => {
                 self.running_clouds.remove(cloud_name);
-                self.cloud_logs
-                    .push(format!("🛑 Stopped cloud '{}'", cloud_name));
-                self.cloud_start_error = None;
-            }
-            Err(e) => {
-                self.cloud_start_error = Some(format!("❌ {}", e));
-            }
-        }
-    }
-
-    pub async fn stop_all_servers(&mut self, orchestrator: &mut Orchestrator) {
-        match orchestrator.stop_all().await {
-            Ok(_) => {
-                self.running_clouds.clear();
-                self.cloud_logs.push("🛑 Stopped all clouds".to_string());
                 self.cloud_start_error = None;
             }
             Err(e) => {
@@ -126,24 +103,6 @@ impl CloudsState {
         }
     }
 
-    pub fn has_password(&self, orchestrator: &Orchestrator) -> bool {
-        if self.clouds.is_empty() || self.selected_cloud_index >= self.clouds.len() {
-            return false;
-        }
-
-        let cloud_name = &self.clouds[self.selected_cloud_index].name;
-        orchestrator.cloud_has_password(cloud_name)
-    }
-
-    pub fn verify_password(&self, orchestrator: &Orchestrator, password: &str) -> bool {
-        if self.clouds.is_empty() || self.selected_cloud_index >= self.clouds.len() {
-            return false;
-        }
-
-        let cloud_name = &self.clouds[self.selected_cloud_index].name;
-        orchestrator.verify_cloud_password(cloud_name, password)
-    }
-
     pub fn start_creating_password(&mut self) {
         if self.clouds.is_empty() || self.selected_cloud_index >= self.clouds.len() {
             return;
@@ -167,45 +126,60 @@ impl CloudsState {
         self.running_clouds.get(cloud_name).copied()
     }
 
-    pub fn add_cloud_log(&mut self, message: String) {
-        self.cloud_logs.push(message);
-        // Keep only last 100 logs
-        if self.cloud_logs.len() > 100 {
-            self.cloud_logs.remove(0);
+    pub fn handle_activity_navigation(&mut self, key: KeyCode, log_count: usize) -> bool {
+        if self.focused_panel != DashboardPanel::Activity {
+            return false;
         }
+
+        if log_count == 0 {
+            return matches!(key, KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k'));
+        }
+
+        let current = self
+            .activity_list_state
+            .selected()
+            .unwrap_or(log_count.saturating_sub(1));
+        let next = match key {
+            KeyCode::Up | KeyCode::Char('k') => current.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => (current + 1).min(log_count - 1),
+            KeyCode::Char('g') => 0,
+            KeyCode::Char('G') => log_count - 1,
+            _ => return false,
+        };
+        self.activity_list_state.select(Some(next));
+        true
     }
 }
 
-impl TabFocus for CloudsState {
+impl TabFocus for DashboardState {
     fn get_focused_element(&self) -> String {
         match self.focused_panel {
-            CloudFocusedPanel::Clouds => "clouds".to_string(),
-            CloudFocusedPanel::CloudInfo => "cloud_info".to_string(),
-            CloudFocusedPanel::CloudLogs => "cloud_logs".to_string(),
+            DashboardPanel::Services => "services".to_string(),
+            DashboardPanel::Overview => "overview".to_string(),
+            DashboardPanel::Activity => "activity".to_string(),
         }
     }
 
     fn cycle_focus_forward(&mut self) {
         self.focused_panel = match self.focused_panel {
-            CloudFocusedPanel::Clouds => CloudFocusedPanel::CloudInfo,
-            CloudFocusedPanel::CloudInfo => CloudFocusedPanel::CloudLogs,
-            CloudFocusedPanel::CloudLogs => CloudFocusedPanel::Clouds,
+            DashboardPanel::Services => DashboardPanel::Overview,
+            DashboardPanel::Overview => DashboardPanel::Activity,
+            DashboardPanel::Activity => DashboardPanel::Services,
         };
     }
 
     fn cycle_focus_backward(&mut self) {
         self.focused_panel = match self.focused_panel {
-            CloudFocusedPanel::Clouds => CloudFocusedPanel::CloudLogs,
-            CloudFocusedPanel::CloudInfo => CloudFocusedPanel::Clouds,
-            CloudFocusedPanel::CloudLogs => CloudFocusedPanel::CloudInfo,
+            DashboardPanel::Services => DashboardPanel::Activity,
+            DashboardPanel::Overview => DashboardPanel::Services,
+            DashboardPanel::Activity => DashboardPanel::Overview,
         };
     }
 
     fn handle_navigation(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::Up | KeyCode::Char('k') => {
-                if self.focused_panel == CloudFocusedPanel::Clouds && self.selected_cloud_index > 0
-                {
+                if self.focused_panel == DashboardPanel::Services && self.selected_cloud_index > 0 {
                     self.selected_cloud_index -= 1;
                     self.clouds_list_state
                         .select(Some(self.selected_cloud_index));
@@ -213,10 +187,25 @@ impl TabFocus for CloudsState {
                 true
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if self.focused_panel == CloudFocusedPanel::Clouds
+                if self.focused_panel == DashboardPanel::Services
                     && self.selected_cloud_index < self.clouds.len().saturating_sub(1)
                 {
                     self.selected_cloud_index += 1;
+                    self.clouds_list_state
+                        .select(Some(self.selected_cloud_index));
+                }
+                true
+            }
+            KeyCode::Char('g') => {
+                if self.focused_panel == DashboardPanel::Services && !self.clouds.is_empty() {
+                    self.selected_cloud_index = 0;
+                    self.clouds_list_state.select(Some(0));
+                }
+                true
+            }
+            KeyCode::Char('G') => {
+                if self.focused_panel == DashboardPanel::Services && !self.clouds.is_empty() {
+                    self.selected_cloud_index = self.clouds.len() - 1;
                     self.clouds_list_state
                         .select(Some(self.selected_cloud_index));
                 }
@@ -228,5 +217,26 @@ impl TabFocus for CloudsState {
             }
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activity_navigation_respects_bounds() {
+        let mut state = DashboardState::new();
+        state.focused_panel = DashboardPanel::Activity;
+        state.activity_list_state.select(Some(2));
+
+        assert!(state.handle_activity_navigation(KeyCode::Down, 3));
+        assert_eq!(state.activity_list_state.selected(), Some(2));
+
+        assert!(state.handle_activity_navigation(KeyCode::Char('g'), 3));
+        assert_eq!(state.activity_list_state.selected(), Some(0));
+
+        assert!(state.handle_activity_navigation(KeyCode::Char('G'), 3));
+        assert_eq!(state.activity_list_state.selected(), Some(2));
     }
 }

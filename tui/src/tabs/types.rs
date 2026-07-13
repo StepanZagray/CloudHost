@@ -10,10 +10,10 @@ use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Display, EnumIter, FromRepr)]
 pub enum SelectedTab {
     #[default]
-    #[strum(to_string = "Clouds")]
-    Clouds,
-    #[strum(to_string = "Folders")]
-    Folders,
+    #[strum(to_string = "Dashboard")]
+    Dashboard,
+    #[strum(to_string = "Storage")]
+    Storage,
     #[strum(to_string = "Settings")]
     Settings,
 }
@@ -49,8 +49,8 @@ impl SelectedTab {
 
     pub const fn palette(self) -> tailwind::Palette {
         match self {
-            Self::Clouds => tailwind::BLUE,
-            Self::Folders => tailwind::GREEN,
+            Self::Dashboard => tailwind::BLUE,
+            Self::Storage => tailwind::GREEN,
             Self::Settings => tailwind::INDIGO,
         }
     }
@@ -68,14 +68,14 @@ impl SelectedTab {
 impl SelectedTab {
     pub fn render_tab(
         self,
-        app: &mut crate::models::App,
+        app: &mut crate::app::App,
         area: Rect,
         buf: &mut ratatui::buffer::Buffer,
     ) {
         match self {
-            Self::Clouds => crate::tabs::clouds::ui::render_servers_tab(app, area, buf),
-            Self::Folders => crate::tabs::folders::ui::render_folders_tab(app, area, buf),
-            Self::Settings => crate::tabs::settings::ui::render_settings_tab(app, area, buf),
+            Self::Dashboard => crate::tabs::dashboard::view::render_dashboard(app, area, buf),
+            Self::Storage => crate::tabs::storage::view::render_storage(app, area, buf),
+            Self::Settings => crate::tabs::settings::view::render_settings(app, area, buf),
         }
     }
 }

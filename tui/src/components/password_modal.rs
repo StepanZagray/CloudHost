@@ -5,6 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 
+use crate::components::modal::centered_rect;
 use crate::utils::password::{PasswordCreationState, PasswordMode};
 
 /// Renders a password creation modal
@@ -17,16 +18,10 @@ pub fn render_password_modal(
 ) {
     use ratatui::style::Modifier;
 
-    // Modal dimensions
-    let modal_width = 60.min(area.width.saturating_sub(4));
-    let modal_height = 15.min(area.height.saturating_sub(4));
-
-    let modal_area = Rect {
-        x: (area.width.saturating_sub(modal_width)) / 2,
-        y: (area.height.saturating_sub(modal_height)) / 2,
-        width: modal_width,
-        height: modal_height,
-    };
+    let modal_area = centered_rect(area, 60, 15);
+    if modal_area.width == 0 || modal_area.height == 0 {
+        return;
+    }
 
     // Clear the area behind the modal
     Clear.render(modal_area, buf);

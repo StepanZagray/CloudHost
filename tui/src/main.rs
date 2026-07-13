@@ -4,15 +4,18 @@ use ratatui::{
     crossterm::event::{self, Event, KeyEventKind},
     DefaultTerminal,
 };
+use std::time::Duration;
 
+mod app;
 mod components;
 mod config;
 mod error;
-mod models;
+mod external;
 mod tabs;
+mod ui;
 mod utils;
+use app::App;
 use error::TuiResult;
-use models::App;
 
 /// CloudHost TUI - Personal Cloud Storage Server
 #[derive(Parser, Debug)]
@@ -72,14 +75,14 @@ async fn main() -> Result<()> {
 impl App {
     async fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         // Start debug stream subscription
-        while self.state == models::AppState::Running {
+        while self.state == app::AppState::Running {
             terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
 
             // Check for timeouts before handling new events
             self.check_timeouts().await;
 
             // Update server logs periodically
-            self.update_cloud_logs().await;
+            self.refresh_activity().await;
 
             self.handle_events().await?;
         }
@@ -87,9 +90,13 @@ impl App {
     }
 
     async fn handle_events(&mut self) -> TuiResult<()> {
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                self.handle_dynamic_key(key.code, key.modifiers).await;
+        // Polling rather than blocking on `read` keeps log output, key-sequence
+        // timeouts, and transient status messages responsive while idle.
+        if event::poll(Duration::from_millis(250))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    self.handle_dynamic_key(key.code, key.modifiers).await;
+                }
             }
         }
         Ok(())
